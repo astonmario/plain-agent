@@ -1,0 +1,39 @@
+{
+  "name": "plain-agent",
+  "version": "0.1.0",
+  "description": "A general-purpose AI agent with Electron + React + TypeScript + SQLite",
+  "main": "dist/main.js",
+  "type": "module",
+  "scripts": {
+    "dev:core": "tsx src/agent-core/test.ts",
+    "dev:electron": "electron .",
+    "build:core": "tsc -p tsconfig.core.json",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "build": "npm run build:core && npm run build:electron",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "electron",
+    "react",
+    "typescript"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^9.2.2",
+    "openai": "^4.20.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.8",
+    "@types/node": "^20.10.5",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3",
+    "vitest": "^1.1.0"
+  }
+}

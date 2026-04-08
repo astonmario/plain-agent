@@ -72,13 +72,16 @@ export async function agentLoop(
 
     let response;
     try {
+      // 从环境变量读取配置
+      const llmConfig = {
+        provider: 'openai',
+        apiKey: process.env.API_KEY || '',
+        model: process.env.MODEL || 'deepseek-chat',
+        baseUrl: process.env.BASE_URL || 'https://api.deepseek.com',
+      };
+
       response = await callLLM(
-        {
-          provider: 'openai',
-          apiKey: process.env.OPENAI_API_KEY || '',
-          model: process.env.MODEL || 'gpt-4',
-          baseUrl: process.env.BASE_URL,
-        },
+        llmConfig,
         messages,
         toolSchemas,
         ctx.signal

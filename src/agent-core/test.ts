@@ -3,18 +3,40 @@
  * 用于验证核心功能是否正常工作
  */
 
-import { PlainAgent, MemoryStorage, getBuiltinTools } from './agent-core';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
+import { PlainAgent, MemoryStorage, getBuiltinTools } from './index.js';
+
+// 加载 .env 文件
+function loadEnv() {
+  try {
+    const envPath = resolve(process.cwd(), '.env');
+    const envContent = readFileSync(envPath, 'utf-8');
+    for (const line of envContent.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const [key, ...values] = trimmed.split('=');
+      if (key && values.length > 0) {
+        process.env[key.trim()] = values.join('=').trim();
+      }
+    }
+  } catch (error) {
+    // .env 文件不存在，使用系统环境变量
+  }
+}
+
+loadEnv();
 
 async function test() {
   console.log('🚀 Plain Agent Core 测试\n');
 
   // 检查环境变量
-  if (!process.env.OPENAI_API_KEY) {
-    console.error('❌ 错误: 请设置 OPENAI_API_KEY 环境变量');
+  if (!process.env.API_KEY) {
+    console.error('❌ 错误: 请设置 API_KEY 环境变量');
     console.log('\n提示: 创建 .env 文件并添加:');
-    console.log('OPENAI_API_KEY=your-api-key');
-    console.log('MODEL=gpt-4');
-    console.log('BASE_URL=https://api.openai.com/v1 (可选)');
+    console.log('API_KEY=your-api-key');
+    console.log('MODEL=deepseek-chat');
+    console.log('BASE_URL=https://api.deepseek.com');
     process.exit(1);
   }
 
@@ -22,8 +44,8 @@ async function test() {
   const agent = new PlainAgent({
     llm: {
       provider: 'openai',
-      apiKey: process.env.OPENAI_API_KEY!,
-      model: process.env.MODEL || 'gpt-4',
+      apiKey: process.env.API_KEY!,
+      model: process.env.MODEL || 'deepseek-chat',
       baseUrl: process.env.BASE_URL,
     },
     tools: getBuiltinTools(),

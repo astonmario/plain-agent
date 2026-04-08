@@ -1,16 +1,19 @@
 /**
  * SQLite 存储适配器
+ * 注意：需要安装 better-sqlite3 依赖
  */
 
-import Database from 'better-sqlite3';
+// import Database from 'better-sqlite3';
 import type { SessionStorage, Session, ChatMessage, AgentEvent } from '../types';
 
 export class SQLiteStorage implements SessionStorage {
-  private db: Database.Database;
+  // private db: Database.Database;
+  private db: any;
 
   constructor(dbPath: string) {
-    this.db = new Database(dbPath);
-    this.initTables();
+    // this.db = new Database(dbPath);
+    // this.initTables();
+    throw new Error('SQLiteStorage 需要安装 better-sqlite3 依赖');
   }
 
   private initTables(): void {

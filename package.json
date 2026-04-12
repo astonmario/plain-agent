@@ -6,6 +6,8 @@
   "type": "module",
   "scripts": {
     "dev:core": "tsx src/agent-core/test.ts",
+    "dev:cli": "tsx src/cli.ts",
+    "cli": "tsx src/cli.ts",
     "dev:electron": "electron .",
     "build:core": "tsc -p tsconfig.core.json",
     "build:electron": "tsc -p tsconfig.electron.json",

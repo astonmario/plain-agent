@@ -7,7 +7,9 @@
   "scripts": {
     "dev:core": "tsx src/agent-core/test.ts",
     "dev:cli": "tsx src/cli.ts",
+    "dev:server": "tsx src/server.ts",
     "cli": "tsx src/cli.ts",
+    "server": "tsx src/server.ts",
     "dev:electron": "electron .",
     "build:core": "tsc -p tsconfig.core.json",
     "build:electron": "tsc -p tsconfig.electron.json",
@@ -25,6 +27,8 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@hono/node-server": "^2.1.4",
+    "hono": "^4.13.13",
     "openai": "^4.20.0",
     "zod": "^3.22.4"
   },

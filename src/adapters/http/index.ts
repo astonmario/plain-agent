@@ -5,12 +5,11 @@
 
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { stream } from 'hono/streaming';
 import { PlainAgent, MemoryStorage, getBuiltinTools } from '../../agent-core/index.js';
-import { readFileSync, existsSync } from 'fs';
-import { join } from 'path';
 import type { AgentEvent } from '../../agent-core/types.js';
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
+import { readFileSync, existsSync } from 'fs';
+import { join, resolve } from 'path';
 
 // 加载 .env 文件
 function loadEnv() {
@@ -110,7 +109,7 @@ export class HttpAdapter {
       this.agents.set(sid, agent);
 
       // SSE 响应
-      return c.stream(async (stream) => {
+      return stream(c, async (stream) => {
         // 设置 SSE 头
         c.header('Content-Type', 'text/event-stream');
         c.header('Cache-Control', 'no-cache');

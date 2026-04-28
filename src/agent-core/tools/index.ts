@@ -5,13 +5,16 @@
 export type { Tool, ToolSchema, ToolContext, ToolMeta } from '../types';
 
 // 内置工具
-export { readFileTool } from './file';
-export { writeFileTool } from './file';
+export { readFileTool, writeFileTool } from './file';
 export { bashTool } from './bash';
+export { httpGetTool } from './network';
+export { listDirectoryTool, calculatorTool, datetimeTool } from './utility';
 
 // 工具注册表
 import { readFileTool, writeFileTool } from './file';
 import { bashTool } from './bash';
+import { httpGetTool } from './network';
+import { listDirectoryTool, calculatorTool, datetimeTool } from './utility';
 import type { Tool } from '../types';
 
 /**
@@ -22,5 +25,9 @@ export function getBuiltinTools(): Tool[] {
     readFileTool,
     writeFileTool,
     bashTool,
+    httpGetTool,
+    listDirectoryTool,
+    calculatorTool,
+    datetimeTool,
   ];
 }

@@ -116,7 +116,7 @@ export async function callLLM(
   signal?: AbortSignal
 ): Promise<LLMResponse> {
   const res = await request(config, messages, tools, false, signal);
-  const data = await res.json();
+  const data: any = await res.json();
 
   const choice = data.choices?.[0];
   if (!choice) {

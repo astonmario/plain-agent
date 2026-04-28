@@ -10,10 +10,7 @@
     "dev:server": "tsx src/server.ts",
     "cli": "tsx src/cli.ts",
     "server": "tsx src/server.ts",
-    "dev:electron": "electron .",
-    "build:core": "tsc -p tsconfig.core.json",
-    "build:electron": "tsc -p tsconfig.electron.json",
-    "build": "npm run build:core && npm run build:electron",
+    "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest"
   },

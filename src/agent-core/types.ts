@@ -75,6 +75,7 @@ export interface ToolMeta {
   readonly?: boolean;      // 只读操作（可并发）
   concurrent?: boolean;     // 是否支持并发执行
   dangerous?: boolean;      // 危险操作（需要权限确认）
+  tags?: string[];          // 工具标签
 }
 
 export interface ToolContext {

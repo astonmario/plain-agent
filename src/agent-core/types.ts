@@ -33,6 +33,8 @@ export interface LLMConfig {
 
 export type AgentEvent =
   | { type: 'user'; message: string; timestamp: number }
+  | { type: 'task-start'; taskId: string; task: string; timestamp: number }
+  | { type: 'task-end'; taskId: string; timestamp: number }
   | { type: 'iteration'; index: number; timestamp: number }
   | { type: 'thinking'; content: string; timestamp: number }
   | { type: 'tool_start'; tool: string; args: any; timestamp: number }
@@ -40,7 +42,9 @@ export type AgentEvent =
   | { type: 'assistant'; message: string; timestamp: number }
   | { type: 'error'; error: SerializedError; timestamp: number }
   | { type: 'done'; result: string; timestamp: number }
-  | { type: 'stopped'; timestamp: number };
+  | { type: 'stopped'; timestamp: number }
+  | { type: 'compression'; level: 1 | 2 | 3; tokensBefore: number; tokensAfter: number; timestamp: number }
+  | { type: 'session-warning'; reason: 'too-long' | 'frequent-compression'; suggestion: string; timestamp: number };
 
 export interface SerializedError {
   name: string;
@@ -114,6 +118,19 @@ export interface AgentConfig {
   sessionId?: string;
   storage?: SessionStorage;
   permissionMode?: 'standard' | 'trust' | 'ask';
+  historyManagement?: HistoryManagementConfig;
+}
+
+// ============ 消息历史管理配置 ============
+
+export interface HistoryManagementConfig {
+  enabled?: boolean;               // 是否启用历史管理（默认 true）
+  maxTokens?: number;              // 最大 token 数（默认 8000）
+  maxToolOutputLength?: number;    // 单个工具输出最大长度（默认 1000）
+  keepRecentMessages?: number;     // 保留最近 N 条消息（默认 10）
+  compressionThreshold?: number;   // 触发第二层压缩的 token 阈值（默认 6000）
+  aggressiveThreshold?: number;    // 触发第三层激进压缩的阈值（默认 10000）
+  autoCompress?: boolean;          // 是否自动压缩（默认 true）
 }
 
 // ============ Agent 执行结果 ============

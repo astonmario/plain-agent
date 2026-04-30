@@ -114,6 +114,19 @@ export async function agentLoop(
     if (response.tool_calls && response.tool_calls.length > 0) {
       // 有工具调用：执行工具
       for (const call of response.tool_calls) {
+        // 在执行每个工具前检查取消状态
+        if (ctx.signal.aborted) {
+          ctx.emitEvent({
+            type: 'stopped',
+            timestamp: Date.now(),
+          });
+          return {
+            result: '[stopped]',
+            messages,
+            stopReason: 'stopped',
+          };
+        }
+
         const result = await executeToolCall(call, tools, ctx);
 
         // 将工具结果添加到消息历史
@@ -219,6 +232,19 @@ async function executeToolCall(
       });
       return errorMsg;
     }
+  }
+
+  // 执行前再次检查取消状态
+  if (ctx.signal.aborted) {
+    const errorMsg = '[已取消]';
+    ctx.emitEvent({
+      type: 'tool_result',
+      tool: tool.name,
+      result: errorMsg,
+      duration: Date.now() - startTime,
+      timestamp: Date.now(),
+    });
+    return errorMsg;
   }
 
   // 发射工具开始事件

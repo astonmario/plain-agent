@@ -9,6 +9,7 @@ export { readFileTool, writeFileTool } from './file';
 export { bashTool } from './bash';
 export { httpGetTool } from './network';
 export { listDirectoryTool, calculatorTool, datetimeTool } from './utility';
+export { createHistoryLookupTool, createHistorySearchTool } from './history-lookup';
 
 // 工具注册表
 import { readFileTool, writeFileTool } from './file';

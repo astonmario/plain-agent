@@ -12,7 +12,10 @@
     "server": "tsx src/server.ts",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "vitest"
+    "test": "vitest",
+    "test:history": "tsx src/agent-core/test-history.ts",
+    "test:anchor": "tsx src/agent-core/test-anchor.ts",
+    "test:compression": "tsx src/agent-core/test-smart-compression.ts"
   },
   "keywords": [
     "ai",

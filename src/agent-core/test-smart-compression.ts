@@ -30,7 +30,7 @@ const testConfig = {
         function: {
           name: 'test_tool',
           description: 'Test',
-          parameters: { type: 'object', properties: {} }
+          parameters: { type: 'object' as const, properties: {} }
         }
       },
       handler: async () => 'Test result',
@@ -231,7 +231,7 @@ async function runTest(
 
   if (health.reason.length > 0) {
     console.log(`  - 原因:`);
-    health.reason.forEach(r => console.log(`    • ${r}`));
+    (health.reason as string[]).forEach(r => console.log(`    • ${r}`));
   }
 
   // 手动触发压缩检查

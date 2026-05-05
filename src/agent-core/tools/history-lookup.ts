@@ -4,7 +4,7 @@
  * 当 LLM 需要查看被压缩的工具输出时，可以使用这个工具
  */
 
-import type { Tool, ToolContext, ChatMessage } from './types';
+import type { Tool, ToolContext, ChatMessage } from '../types.js';
 
 /**
  * 创建历史追溯工具

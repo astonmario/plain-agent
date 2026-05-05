@@ -177,7 +177,7 @@ export class CompressionTrigger {
       urgency = 'high';
     } else if (roundCount >= 20) {
       reasons.push(`对话已进行 ${roundCount} 轮，建议压缩`);
-      urgency = urgency === 'high' ? 'high' : 'medium';
+      urgency = 'medium';
     }
 
     // 判断 2：Token 使用率

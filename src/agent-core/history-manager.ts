@@ -98,7 +98,11 @@ function detectContentType(content: string): 'log' | 'json' | 'code' | 'query-re
 /**
  * 截断内容并添加说明
  */
-function truncateContent(content: string, maxLength: number, type: string): string {
+function truncateContent(
+  content: string,
+  maxLength: number,
+  type: 'log' | 'json' | 'code' | 'query-result' | 'normal'
+): string {
   if (content.length <= maxLength) {
     return content;
   }
@@ -106,7 +110,7 @@ function truncateContent(content: string, maxLength: number, type: string): stri
   const truncated = content.slice(0, maxLength);
   const remaining = content.length - maxLength;
 
-  const typeDescriptions = {
+  const typeDescriptions: Record<string, string> = {
     log: '日志',
     json: 'JSON 数据',
     code: '代码',

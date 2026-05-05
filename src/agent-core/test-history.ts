@@ -125,13 +125,15 @@ async function testLayer2Compression() {
   };
 
   try {
-    const compressed = await manager.compress(messages, llmConfig);
+    const result = await manager.compress(messages, llmConfig);
+    const compressed = result.compressed;
 
     console.log('\n压缩后:');
     console.log(`- 消息数: ${compressed.length}`);
     console.log(`- 估算 tokens: ${estimateTokens(compressed)}`);
+    console.log(`- 压缩层级: Level ${result.level}`);
     console.log('\n摘要消息:');
-    console.log(compressed.find(m => m.content?.includes('[历史对话摘要]'))?.content);
+    console.log(compressed.find(m => m.content?.includes('[对话状态'))?.content);
   } catch (error) {
     console.log('\n⚠️  第二层压缩需要 LLM API，跳过测试');
     console.log('错误:', error instanceof Error ? error.message : error);

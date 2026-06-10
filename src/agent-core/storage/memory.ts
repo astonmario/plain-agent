@@ -57,6 +57,20 @@ export class MemoryStorage implements SessionStorage {
       .sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
+  async renameSession(sessionId: string, newTitle: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.title = newTitle;
+      session.updatedAt = Date.now();
+    }
+  }
+
+  async deleteSession(sessionId: string): Promise<void> {
+    this.sessions.delete(sessionId);
+    this.messages.delete(sessionId);
+    this.events.delete(sessionId);
+  }
+
   clear(): void {
     this.sessions.clear();
     this.messages.clear();

@@ -99,6 +99,8 @@ export interface SessionStorage {
   loadEvents(sessionId: string): Promise<AgentEvent[]>;
   createSession(sessionId: string, title: string): Promise<void>;
   listSessions(): Promise<Session[]>;
+  renameSession(sessionId: string, newTitle: string): Promise<void>;
+  deleteSession(sessionId: string): Promise<void>;
 }
 
 export interface Session {

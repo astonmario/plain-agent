@@ -1,19 +1,23 @@
 /**
  * SQLite 存储适配器
- * 注意：需要安装 better-sqlite3 依赖
+ * 基于 Node 22+ 内置的 node:sqlite 模块（零依赖）
+ * 在 Electron 主进程（内置 Node 24）中可用
  */
 
-// import Database from 'better-sqlite3';
+import { createRequire } from 'module';
 import type { SessionStorage, Session, ChatMessage, AgentEvent } from '../types';
 
 export class SQLiteStorage implements SessionStorage {
-  // private db: Database.Database;
+  // node:sqlite 的 DatabaseSync 实例
   private db: any;
 
   constructor(dbPath: string) {
-    // this.db = new Database(dbPath);
-    // this.initTables();
-    throw new Error('SQLiteStorage 需要安装 better-sqlite3 依赖');
+    // 动态加载 node:sqlite，避免在 Node 20 环境（CLI/server）加载模块时失败
+    const require = createRequire(import.meta.url);
+    const { DatabaseSync } = require('node:sqlite');
+
+    this.db = new DatabaseSync(dbPath);
+    this.initTables();
   }
 
   private initTables(): void {
@@ -143,6 +147,21 @@ export class SQLiteStorage implements SessionStorage {
       updatedAt: row.updated_at,
       status: row.status,
     }));
+  }
+
+  async renameSession(sessionId: string, newTitle: string): Promise<void> {
+    this.db.prepare(`
+      UPDATE sessions
+      SET title = ?, updated_at = ?
+      WHERE id = ?
+    `).run(newTitle, Date.now(), sessionId);
+  }
+
+  async deleteSession(sessionId: string): Promise<void> {
+    // 由于有 ON DELETE CASCADE，删除会话时会自动删除关联的消息和事件
+    this.db.prepare(`
+      DELETE FROM sessions WHERE id = ?
+    `).run(sessionId);
   }
 
   close(): void {

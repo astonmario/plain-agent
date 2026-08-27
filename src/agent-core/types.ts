@@ -88,6 +88,10 @@ export interface ToolContext {
   emitEvent: (event: AgentEvent) => void;
   storage?: SessionStorage;
   permissionCheck?: (tool: Tool, args: any) => Promise<boolean>;
+  /** bash 后台任务注册表（JobRegistry）；undefined = 后台任务不可用 */
+  jobs?: any;
+  /** Windows 上 Git Bash 路径（可选，用于 bash 工具） */
+  gitBashPath?: string;
 }
 
 // ============ 存储接口（依赖倒置）============

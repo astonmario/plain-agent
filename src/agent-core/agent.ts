@@ -20,6 +20,7 @@ import { randomUUID } from 'crypto';
 import { agentLoop } from './loop';
 import { HistoryManager } from './history-manager';
 import { createHistoryLookupTool, createHistorySearchTool } from './tools/history-lookup';
+import { JobRegistry } from './tools/jobs';
 import type {
   AgentConfig,
   AgentEvent,
@@ -54,6 +55,9 @@ export class PlainAgent extends EventEmitter {
 
   // 消息历史管理器
   private historyManager: HistoryManager;
+
+  // bash 后台任务注册表
+  private jobs = new JobRegistry();
 
   /**
    * 构造函数
@@ -174,6 +178,7 @@ export class PlainAgent extends EventEmitter {
       permissionCheck: async (tool, args) => {
         return await this.checkPermission(tool, args); // 权限检查回调
       },
+      jobs: this.jobs, // bash 后台任务注册表
     };
 
     // 发射任务开始事件
@@ -351,6 +356,7 @@ export class PlainAgent extends EventEmitter {
    */
   destroy(): void {
     this.stop(); // 停止所有任务
+    this.jobs.killAll(); // 终止所有后台任务
     this.removeAllListeners();
   }
 

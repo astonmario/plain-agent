@@ -159,7 +159,7 @@ ctx.signal.addEventListener('abort', () => {
 ## 测试取消功能
 
 ```typescript
-import { PlainAgent } from './agent-core';
+import { PlainAgent } from '@plain-agent/domain';
 
 const agent = new PlainAgent({
   tools: [/* your tools */],

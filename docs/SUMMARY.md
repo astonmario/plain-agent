@@ -119,7 +119,7 @@ if (urgency === 'high' && repetitionScore >= 0.4) {
 ### 核心实现
 
 ```
-src/agent-core/
+domain/src/
 ├── agent.ts                    # Agent 主类（集成历史管理）
 ├── history-manager.ts          # 三层压缩管理器
 ├── anchor.ts                   # Anchor 结构化状态
@@ -132,7 +132,7 @@ src/agent-core/
 ### 测试文件
 
 ```
-src/agent-core/
+domain/test/
 ├── test-history.ts             # 历史管理测试
 ├── test-anchor.ts              # Anchor 机制测试
 └── test-smart-compression.ts   # 智能触发测试
@@ -231,13 +231,13 @@ const results = agent.searchToolOutputs('bash', 'npm install');
 
 ```bash
 # 历史管理基础测试
-npm run test:history
+pnpm test:history
 
 # Anchor 机制测试
-npm run test:anchor
+pnpm test:anchor
 
 # 智能触发器测试（推荐）
-npm run test:compression
+pnpm test:compression
 ```
 
 ## 🎯 核心创新

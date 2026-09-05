@@ -125,7 +125,7 @@ Agent 在长时间对话中会积累大量消息历史，导致：
 Agent 会自动监测消息历史长度，达到阈值时自动压缩：
 
 ```typescript
-import { PlainAgent } from './agent-core';
+import { PlainAgent } from '@plain-agent/domain';
 
 const agent = new PlainAgent({
   llm: { /* LLM 配置 */ },
@@ -240,7 +240,7 @@ results.forEach(r => {
 如果你需要在其他地方使用压缩功能：
 
 ```typescript
-import { HistoryManager, estimateTokens } from './agent-core';
+import { HistoryManager, estimateTokens } from '@plain-agent/domain';
 
 const manager = new HistoryManager({
   maxTokens: 4000,
@@ -366,13 +366,13 @@ const agent = new PlainAgent({
 运行测试查看压缩效果：
 
 ```bash
-npm run test:history
+pnpm test:history
 ```
 
 或在代码中：
 
 ```typescript
-import { testHistoryManager } from './agent-core/test-history';
+import { testHistoryManager } from '../domain/test/test-history';
 await testHistoryManager();
 ```
 

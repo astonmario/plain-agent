@@ -1,0 +1,20 @@
+{
+  "name": "@plain-agent/cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "plain-agent 命令行客户端",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@plain-agent/domain": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}

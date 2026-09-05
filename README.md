@@ -4,6 +4,7 @@
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-20+-green)](https://nodejs.org/)
+[![pnpm](https://img.shields.io/badge/pnpm-workspace-orange)](https://pnpm.io/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ## ✨ 特性
@@ -21,7 +22,7 @@
 ### 1. 安装依赖
 
 ```bash
-npm install
+pnpm install
 ```
 
 ### 2. 配置环境变量
@@ -39,7 +40,7 @@ MODEL=deepseek-chat
 #### CLI 模式（交互式命令行）
 
 ```bash
-npm run cli
+pnpm cli
 ```
 
 **使用示例**：
@@ -60,35 +61,54 @@ npm run cli
 #### 测试模式
 
 ```bash
-npm run dev:core
+pnpm dev:core
 ```
 
-## 📦 项目结构
+#### HTTP Server 模式
+
+```bash
+pnpm server
+```
+
+#### 桌面端模式（Electron + React）
+
+```bash
+pnpm dev:desktop
+```
+
+## 📦 项目结构（pnpm monorepo）
 
 ```
 plain-agent/
-├── src/
-│   ├── agent-core/              # 核心业务逻辑（完全独立）
-│   │   ├── types.ts            # 类型定义
-│   │   ├── agent.ts            # Agent 主类（EventEmitter）
-│   │   ├── llm.ts              # LLM 调用封装（OpenAI 兼容）
-│   │   ├── loop.ts             # ReAct 循环引擎
-│   │   ├── tools/              # 工具系统
-│   │   │   ├── file.ts        # 文件读写工具
-│   │   │   ├── bash.ts        # 命令执行工具
-│   │   │   └── index.ts       # 工具注册表
-│   │   └── storage/            # 存储适配器
-│   │       ├── memory.ts      # 内存存储
-│   │       ├── sqlite.ts      # SQLite 存储
-│   │       └── index.ts       # 统一接口
-│   ├── adapters/               # 适配层
-│   │   └── cli/               # CLI 适配器 ✅
-│   │       └── index.ts
-│   └── cli.ts                  # CLI 入口
-├── .env                        # 环境配置
-├── package.json
-└── README.md
+├── domain/                    # @plain-agent/domain —— 框架无关的 Agent 核心
+│   ├── src/
+│   │   ├── types.ts          # 类型定义
+│   │   ├── agent.ts          # Agent 主类（EventEmitter）
+│   │   ├── llm.ts            # LLM 调用封装（OpenAI 兼容）
+│   │   ├── loop.ts           # ReAct 循环引擎
+│   │   ├── history-manager.ts # 三层上下文压缩
+│   │   ├── anchor.ts         # Anchor 结构化状态
+│   │   ├── cliExample.ts     # 核心功能演示脚本
+│   │   ├── tools/            # 工具系统（文件/命令/搜索/网络等）
+│   │   └── storage/          # 存储适配器（内存 / SQLite）
+│   └── test/                 # 核心测试脚本（tsx 直接运行）
+├── cli/                       # @plain-agent/cli —— 命令行客户端
+│   └── src/index.ts
+├── server/                    # @plain-agent/server —— HTTP 服务（Hono + SSE）
+│   └── src/index.ts
+├── desktop/                   # @plain-agent/desktop —— Electron + React 桌面端
+│   └── src/
+│       ├── main/             # 主进程（窗口、IPC、Agent 服务）
+│       ├── preload/          # 预加载脚本（contextBridge）
+│       ├── renderer/         # React UI
+│       └── shared/           # IPC 共享类型
+├── docs/                      # 设计文档
+├── pnpm-workspace.yaml
+└── package.json               # root：脚本编排 + 公共 devDependencies
 ```
+
+各包通过 `workspace:*` 互相引用；`domain` 直接以 TS 源码导出（无构建步骤），
+tsx / esbuild / electron-vite 均可直接消费。
 
 ## 🏗️ 架构设计
 
@@ -143,14 +163,25 @@ plain-agent/
 |------|------|------|
 | `read_file` | 读取文件内容 | ❌ |
 | `write_file` | 写入文件内容 | ⚠️ 是 |
-| `bash` | 执行 shell 命令 | ⚠️ 是 |
+| `edit_file` | 编辑文件内容 | ⚠️ 是 |
+| `bash` | 执行 shell 命令（支持后台任务） | ⚠️ 是 |
+| `glob` | 文件名模式匹配搜索 | ❌ |
+| `grep` | 文件内容搜索 | ❌ |
+| `explore` | 探索目录结构 | ❌ |
+| `list_directory` | 列出目录内容 | ❌ |
+| `http_get` | 发送 HTTP GET 请求 | ❌ |
+| `calculator` | 数学计算 | ❌ |
+| `datetime` | 获取当前时间 | ❌ |
+| `job_output` / `job_kill` | 查看 / 终止后台任务 | ❌ |
+| `update_memory` | 更新 Agent 记忆 | ❌ |
+| `lookup_history` / `search_history` | 历史消息追溯与搜索 | ❌ |
 
 ## 📝 使用示例
 
 ### 作为 npm 包使用
 
 ```typescript
-import { PlainAgent, MemoryStorage, getBuiltinTools } from './agent-core';
+import { PlainAgent, MemoryStorage, getBuiltinTools } from '@plain-agent/domain';
 
 const agent = new PlainAgent({
   llm: {
@@ -182,23 +213,32 @@ agent.destroy();
 - [x] **M1-M2**: 项目初始化、类型系统、LLM 调用、存储层
 - [x] **M3**: Agent Core（ReAct 循环、工具系统）
 - [x] **M4**: CLI Adapter
-- [ ] **M5**: HTTP Server Adapter
-- [ ] **M6**: Electron Adapter + React UI
-- [ ] **M7**: 更多工具（搜索、网络请求等）
-- [ ] **M8**: 上下文压缩、长期记忆
+- [x] **M5**: HTTP Server Adapter（Hono + SSE）
+- [x] **M6**: Electron 桌面端 + React UI
+- [x] **M7**: 更多工具（搜索 glob/grep、网络请求、后台任务等）
+- [x] **M8**: 上下文压缩（三层压缩 + Anchor + 智能触发）
 - [ ] **M9**: 多 Agent 协作
 
 ## 🧪 开发
 
 ```bash
-# 类型检查
-npm run typecheck
+# 安装依赖
+pnpm install
+
+# 全部包类型检查
+pnpm typecheck
 
 # 测试 Agent Core
-npm run dev:core
+pnpm dev:core
 
 # 运行 CLI
-npm run cli
+pnpm cli
+
+# 启动 HTTP 服务
+pnpm server
+
+# 启动桌面端
+pnpm dev:desktop
 ```
 
 ## 📄 License

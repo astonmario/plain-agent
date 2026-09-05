@@ -1,0 +1,33 @@
+{
+  "name": "@plain-agent/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "plain-agent 桌面端（Electron + React）",
+  "license": "MIT",
+  "main": "out/main/index.cjs",
+  "type": "module",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit",
+    "typecheck:web": "tsc -p tsconfig.web.json --noEmit"
+  },
+  "dependencies": {
+    "@plain-agent/domain": "workspace:*",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^4.7.0",
+    "electron": "^41.7.1",
+    "electron-vite": "^5.0.0",
+    "typescript": "^5.3.3",
+    "vite": "^7.3.7"
+  }
+}

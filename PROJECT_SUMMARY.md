@@ -96,7 +96,7 @@
 ### M4: CLI Adapter 实现
 **提交**: `dba1d8e`
 
-✅ CLI 适配器（adapters/cli/index.ts - 274行）
+✅ CLI 适配器（cli/src/index.ts）
 - 交互式命令行界面
 - 彩色输出（用户/Agent/工具/错误等）
 - 实时事件显示（迭代/思考/工具调用/结果）
@@ -111,7 +111,7 @@
 
 ✅ 使用方式
 ```bash
-npm run cli
+pnpm cli
 ```
 
 **成果**: 功能完整的交互式 CLI
@@ -143,16 +143,21 @@ npm run cli
 - Git 提交: 5 次
 - 测试通过: ✅
 
-**项目结构**:
+**项目结构**（pnpm monorepo）：
 ```
 plain-agent/
-├── src/
-│   ├── agent-core/      (12 个文件)
-│   ├── adapters/cli/    (1 个文件)
-│   └── cli.ts
-├── .env                 (环境配置)
-├── package.json
-└── README.md            (191 行)
+├── domain/              # @plain-agent/domain —— Agent 核心（~15 个文件）
+│   ├── src/            # 框架无关核心 + cliExample.ts 演示
+│   └── test/           # 测试脚本（history/anchor/compression）
+├── cli/                # @plain-agent/cli —— 命令行客户端
+├── server/             # @plain-agent/server —— HTTP 服务（Hono + SSE）
+├── desktop/            # @plain-agent/desktop —— Electron + React
+│   └── src/{main,preload,renderer,shared}/
+├── docs/               # 设计文档
+├── pnpm-workspace.yaml
+├── .env                (环境配置)
+├── package.json        (root：脚本编排)
+└── README.md
 ```
 
 ## 🎯 核心特性
@@ -236,13 +241,27 @@ plain-agent/
 ## 🚀 使用方式
 
 ### 1. CLI 模式
+
 ```bash
-npm run cli
+pnpm cli
 ```
 
-### 2. 代码集成
+### 2. HTTP Server 模式
+
+```bash
+pnpm server
+```
+
+### 3. 桌面端模式
+
+```bash
+pnpm dev:desktop
+```
+
+### 4. 代码集成
+
 ```typescript
-import { PlainAgent, MemoryStorage, getBuiltinTools } from './agent-core';
+import { PlainAgent, MemoryStorage, getBuiltinTools } from '@plain-agent/domain';
 
 const agent = new PlainAgent({
   llm: { apiKey: '...', model: 'deepseek-chat' },
@@ -254,9 +273,10 @@ agent.on('event', console.log);
 await agent.submit('读取 package.json');
 ```
 
-### 3. 测试模式
+### 5. 测试模式
+
 ```bash
-npm run dev:core
+pnpm dev:core
 ```
 
 ## 🗺️ Roadmap

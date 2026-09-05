@@ -1,25 +1,22 @@
 {
   "name": "plain-agent",
   "version": "0.1.0",
+  "private": true,
   "description": "A general-purpose AI agent with Electron + React + TypeScript + SQLite",
-  "main": "out/main/index.cjs",
-  "type": "module",
+  "packageManager": "pnpm@10.14.0",
   "scripts": {
-    "dev:core": "tsx src/agent-core/test.ts",
-    "dev:cli": "tsx src/cli.ts",
-    "dev:server": "tsx src/server.ts",
-    "dev:desktop": "electron-vite dev",
-    "cli": "tsx src/cli.ts",
-    "server": "tsx src/server.ts",
-    "build": "tsc",
-    "build:desktop": "electron-vite build",
-    "preview:desktop": "electron-vite preview",
-    "typecheck": "tsc --noEmit",
-    "typecheck:web": "tsc -p tsconfig.web.json --noEmit",
-    "test": "vitest",
-    "test:history": "tsx src/agent-core/test-history.ts",
-    "test:anchor": "tsx src/agent-core/test-anchor.ts",
-    "test:compression": "tsx src/agent-core/test-smart-compression.ts"
+    "dev:core": "pnpm --filter @plain-agent/domain dev",
+    "dev:cli": "pnpm --filter @plain-agent/cli dev",
+    "dev:server": "pnpm --filter @plain-agent/server dev",
+    "dev:desktop": "pnpm --filter @plain-agent/desktop dev",
+    "cli": "pnpm --filter @plain-agent/cli dev",
+    "server": "pnpm --filter @plain-agent/server start",
+    "build": "pnpm --filter @plain-agent/desktop build",
+    "typecheck": "pnpm -r typecheck",
+    "typecheck:web": "pnpm --filter @plain-agent/desktop typecheck:web",
+    "test:history": "pnpm --filter @plain-agent/domain test:history",
+    "test:anchor": "pnpm --filter @plain-agent/domain test:anchor",
+    "test:compression": "pnpm --filter @plain-agent/domain test:compression"
   },
   "keywords": [
     "ai",
@@ -28,26 +25,16 @@
     "react",
     "typescript"
   ],
-  "author": "",
   "license": "MIT",
-  "dependencies": {
-    "@hono/node-server": "^2.1.4",
-    "hono": "^4.13.13",
-    "iconv-lite": "^0.7.3",
-    "openai": "^4.20.0",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0",
-    "zod": "^3.22.4"
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild"
+    ]
   },
   "devDependencies": {
     "@types/node": "^20.10.5",
-    "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.3.0",
-    "@vitejs/plugin-react": "^4.7.0",
-    "electron": "^41.7.1",
-    "electron-vite": "^5.0.0",
     "tsx": "^4.7.0",
-    "typescript": "^5.3.3",
-    "vite": "^7.3.7"
+    "typescript": "^5.3.3"
   }
 }

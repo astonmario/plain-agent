@@ -1,0 +1,23 @@
+{
+  "name": "@plain-agent/server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "plain-agent HTTP 服务（Hono + SSE）",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.4",
+    "@plain-agent/domain": "workspace:*",
+    "hono": "^4.13.13"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}

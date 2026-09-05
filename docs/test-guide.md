@@ -4,7 +4,7 @@
 
 ```bash
 # 运行智能压缩自测
-npm run test:compression
+pnpm test:compression
 ```
 
 ## 测试场景
@@ -105,7 +105,7 @@ npm run test:compression
 
 ```bash
 # 需要配置 API
-API_KEY=xxx MODEL=xxx BASE_URL=xxx npm run test:anchor
+API_KEY=xxx MODEL=xxx BASE_URL=xxx pnpm test:anchor
 ```
 
 ## 自定义测试

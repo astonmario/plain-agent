@@ -27,11 +27,29 @@ export interface AppSettings {
   permissionMode: 'standard' | 'trust' | 'ask';
 }
 
+/** 技能列表项（不含磁盘路径） */
+export interface SkillSummary {
+  name: string;
+  description: string;
+}
+
+/** 技能详情（编辑用） */
+export interface SkillDetail extends SkillSummary {
+  content: string;
+}
+
+export interface SkillSaveResult {
+  ok: boolean;
+  message: string;
+}
+
 export interface DesktopAPI {
   // 任务
   submit(task: string, taskId?: string): Promise<string>;
   stop(taskId?: string): Promise<void>;
   getRunningTasks(): Promise<string[]>;
+  /** 回答 ask_question 工具的提问（唤醒挂起的 agent loop） */
+  answerInteraction(id: string, answers: string[]): Promise<void>;
 
   // 会话
   getSessionId(): Promise<string>;
@@ -49,6 +67,13 @@ export interface DesktopAPI {
   getConfig(): Promise<AgentConfigInfo>;
   getSettings(): Promise<AppSettings>;
   updateSettings(settings: AppSettings): Promise<void>;
+
+  // 技能管理（只操作用户全局技能目录，不碰项目级）
+  listSkills(): Promise<SkillSummary[]>;
+  readSkill(name: string): Promise<SkillDetail | null>;
+  /** 存在则更新、不存在则新建 */
+  saveSkill(input: SkillDetail): Promise<SkillSaveResult>;
+  deleteSkill(name: string): Promise<SkillSaveResult>;
 
   // 事件订阅
   onEvent(callback: (event: AgentEvent) => void): () => void;

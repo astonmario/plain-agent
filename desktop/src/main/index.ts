@@ -5,6 +5,14 @@
 
 import { app, shell, BrowserWindow, ipcMain } from 'electron';
 import { join } from 'path';
+import {
+  createUserSkill,
+  deleteUserSkill,
+  listUserSkills,
+  readUserSkill,
+  submitInteractionAnswer,
+  updateUserSkill,
+} from '@plain-agent/domain';
 import { AgentService } from './agent-service.js';
 
 let mainWindow: BrowserWindow | null = null;
@@ -71,6 +79,11 @@ function registerIpcHandlers(): void {
     return agentService!.getRunningTasks();
   });
 
+  // ask_question 回答：直接调 domain 的 pending 注册表（进程级单例，与 agent 实例共享）
+  ipcMain.handle('agent:answerInteraction', (_e, id: string, answers: string[]) => {
+    submitInteractionAnswer(id, answers);
+  });
+
   // 会话相关
   ipcMain.handle('agent:getSessionId', () => {
     return agentService!.getSessionId();
@@ -123,6 +136,28 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('settings:update', async (_e, settings: any) => {
     await agentService!.updateSettings(settings);
+  });
+
+  // 技能管理：只操作用户全局技能目录（~/.plain-agent/skills），不暴露磁盘路径给渲染端
+  ipcMain.handle('skills:list', () => {
+    return listUserSkills().map(({ name, description }) => ({ name, description }));
+  });
+
+  ipcMain.handle('skills:read', (_e, name: string) => {
+    const skill = readUserSkill(name);
+    return skill ? { name: skill.name, description: skill.description, content: skill.content } : null;
+  });
+
+  // 存在则更新、不存在则新建（upsert，由主进程裁决，避免渲染端先查再写的竞态）
+  ipcMain.handle('skills:save', (_e, input: { name: string; description: string; content: string }) => {
+    if (readUserSkill(input.name)) {
+      return updateUserSkill(input.name, { description: input.description, content: input.content });
+    }
+    return createUserSkill(input);
+  });
+
+  ipcMain.handle('skills:delete', (_e, name: string) => {
+    return deleteUserSkill(name);
   });
 
   // 事件转发：将 agent 事件推送到渲染进程

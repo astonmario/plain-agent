@@ -6,12 +6,45 @@
  */
 
 import { readFile, writeFile, rename, unlink, mkdir } from 'fs/promises';
+import { statSync } from 'fs';
 import { dirname } from 'path';
 import { randomBytes } from 'crypto';
 import type { Tool } from '../types';
 import { decodeFileText } from './text-decode';
 import { resolvePath } from './paths';
 import iconv from 'iconv-lite';
+
+// ============ 文件 staleness 追踪（搬运自 any-code fileState.ts） ============
+// 进程级 mtime 记忆：read 记、write/edit 对比漂移。外部改动（用户/其它工具改了文件）
+// 不阻断写入，但会在结果里附警告，避免 agent 基于过期内容 blind overwrite。
+
+const fileMtimes = new Map<string, number>();
+
+/** 当前 mtime（ms）；文件不存在返回 undefined */
+function mtimeOf(p: string): number | undefined {
+  try {
+    return statSync(p).mtimeMs;
+  } catch {
+    return undefined;
+  }
+}
+
+/** staleness 检查：read 记过 mtime 且当前漂移 → 返回警告文案（不阻断） */
+function stalenessWarning(filePath: string, action: '编辑' | '覆写'): string {
+  const recorded = fileMtimes.get(filePath);
+  if (recorded === undefined) return '';
+  const cur = mtimeOf(filePath);
+  if (cur !== undefined && Math.abs(cur - recorded) > 1) {
+    return ` [警告: 文件自上次 read 后被外部改动，已${action}]`;
+  }
+  return '';
+}
+
+/** 记录写入后的新 mtime（供后续 write/edit staleness 对比） */
+function recordMtime(filePath: string): void {
+  const nm = mtimeOf(filePath);
+  if (nm !== undefined) fileMtimes.set(filePath, nm);
+}
 
 /**
  * 读取文件工具（分页 + 行号）
@@ -49,6 +82,7 @@ export const readFileTool: Tool = {
       const { filePath, offset = 1, limit = 2000 } = args;
       const abs = resolvePath(filePath);
       const { text: content } = decodeFileText(await readFile(abs));
+      recordMtime(abs);
 
       const lines = content.split('\n');
       const totalLines = lines.length;
@@ -111,13 +145,17 @@ export const writeFileTool: Tool = {
       const abs = resolvePath(filePath);
       await mkdir(dirname(abs), { recursive: true });
 
+      // 写前对比（写后 mtime 已变，警告必须在写之前取）
+      const warn = stalenessWarning(abs, '覆写');
+
       // 原子写：同目录 temp + rename，同文件系统原子发布，崩溃不留半写
       tmp = `${abs}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
       await writeFile(tmp, content, 'utf-8');
       await rename(tmp, abs);
       tmp = null;
+      recordMtime(abs);
 
-      return `Successfully wrote ${content.length} characters to ${filePath}`;
+      return `Successfully wrote ${content.length} characters to ${filePath}${warn}`;
     } catch (error) {
       if (tmp) {
         try { await unlink(tmp); } catch { /* 清理失败忽略 */ }
@@ -176,12 +214,16 @@ export const editFileTool: Tool = {
         return `Error: ${edit.error}`;
       }
 
+      // 写前对比（写后 mtime 已变，警告必须在写之前取）
+      const warn = stalenessWarning(abs, '编辑');
+
       await writeFile(
         abs,
         encoding === 'gbk' ? iconv.encode(edit.content, 'gbk') : Buffer.from(edit.content, 'utf8'),
       );
+      recordMtime(abs);
 
-      return `Successfully edited file.\n--- Removed:\n${oldString}\n--- Added:\n${newString}`;
+      return `Successfully edited file.${warn}\n--- Removed:\n${oldString}\n--- Added:\n${newString}`;
     } catch (error) {
       return `Error: ${error instanceof Error ? error.message : String(error)}`;
     }

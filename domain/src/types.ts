@@ -45,7 +45,26 @@ export type AgentEvent =
   | { type: 'done'; result: string; timestamp: number }
   | { type: 'stopped'; timestamp: number }
   | { type: 'compression'; level: 1 | 2 | 3; tokensBefore: number; tokensAfter: number; timestamp: number }
-  | { type: 'session-warning'; reason: 'too-long' | 'frequent-compression'; suggestion: string; timestamp: number };
+  | { type: 'session-warning'; reason: 'too-long' | 'frequent-compression'; suggestion: string; timestamp: number }
+  | { type: 'interaction'; id: string; questions: InteractionQuestion[]; timestamp: number };
+
+/** ask_question 工具的单个问题 */
+export interface InteractionQuestion {
+  question: string;
+  header?: string;
+  options?: string[];
+  multiSelect?: boolean;
+}
+
+/** 技能条目（use_skill 返回 / create_skill 创建） */
+export interface SkillEntry {
+  name: string;
+  description: string;
+  content: string;
+  /** SKILL.md 所在目录（内置技能可附带，供 agent 读 references/scripts） */
+  dir?: string;
+  origin: 'global' | 'project';
+}
 
 export interface SerializedError {
   name: string;
@@ -93,6 +112,8 @@ export interface ToolContext {
   jobs?: any;
   /** Windows 上 Git Bash 路径（可选，用于 bash 工具） */
   gitBashPath?: string;
+  /** 可用技能注册表（agent 每次提交任务时构建；use_skill 用） */
+  skills?: Map<string, SkillEntry>;
 }
 
 // ============ 存储接口（依赖倒置）============

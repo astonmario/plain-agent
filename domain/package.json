@@ -24,7 +24,8 @@
     "test:compression": "tsx test/test-smart-compression.ts"
   },
   "dependencies": {
-    "iconv-lite": "^0.7.3"
+    "iconv-lite": "^0.7.3",
+    "playwright-core": "^1.49.0"
   },
   "devDependencies": {
     "@types/node": "^20.10.5",

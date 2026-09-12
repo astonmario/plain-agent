@@ -22,6 +22,9 @@ export default defineConfig({
     build: {
       outDir: 'out/main',
       rollupOptions: {
+        // kerberos 是 playwright-core 的可选依赖（仅 Negotiate 代理认证时动态加载），
+        // 不打进 bundle，保持运行时惰性 require
+        external: ['kerberos'],
         output: {
           format: 'cjs',
           entryFileNames: '[name].cjs',

@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState, useCallback, isValidElement } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { AgentEvent, Session, ChatMessage } from '@plain-agent/domain/types';
-import type { AppSettings } from '../../shared/desktop-api';
+import type { AgentEvent, Session, ChatMessage, InteractionQuestion } from '@plain-agent/domain/types';
+import type { AppSettings, SkillDetail, SkillSummary } from '../../shared/desktop-api';
+
+// 与 domain/src/skills.ts 的 SKILL_NAME_RE 保持一致（渲染端不引 domain 运行时，避免打包 node 模块）
+const SKILL_NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 // ============ SVG 图标组件 ============
 
@@ -27,6 +30,13 @@ const IconSettings = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="12" r="3"/>
     <path d="M12 1v6m0 6v6M5.64 5.64l4.24 4.24m4.24 4.24l4.24 4.24M1 12h6m6 0h6M5.64 18.36l4.24-4.24m4.24-4.24l4.24-4.24"/>
+  </svg>
+);
+
+const IconSkills = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
   </svg>
 );
 
@@ -166,9 +176,12 @@ function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState('');
   const [showSettings, setShowSettings] = useState(false);
+  const [showSkills, setShowSkills] = useState(false);
   const [settingsForm, setSettingsForm] = useState<AppSettings | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
+  /** ask_question 待回答的交互（agent 阻塞等答案，模态展示） */
+  const [interaction, setInteraction] = useState<{ id: string; questions: InteractionQuestion[] } | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   /** 当前正在流式输出的文本（在 ref 中累积，不放进 messages，避免高频 setState 竞争） */
   const streamRef = useRef<{ text: string; timestamp: number } | null>(null);
@@ -448,12 +461,14 @@ function App() {
         });
         // 保险：出错即复位运行状态（正常路径依赖 submit 的 reject，这里兜底）
         setIsRunning(false);
+        setInteraction(null);
         break;
 
       case 'done':
         flushStreaming();
         closeToolGroup();
         setIsRunning(false);
+        setInteraction(null);
         refreshUsage();
         break;
 
@@ -462,16 +477,23 @@ function App() {
         closeToolGroup();
         appendMessage({ kind: 'system', text: '任务已停止', timestamp: event.timestamp });
         setIsRunning(false);
+        setInteraction(null);
         break;
 
       case 'task-start':
         setIsRunning(true);
         break;
 
+      case 'interaction':
+        // ask_question：弹出提问模态，阻塞等用户回答
+        setInteraction({ id: event.id, questions: event.questions });
+        break;
+
       case 'task-end':
         flushStreaming();
         closeToolGroup();
         setIsRunning(false);
+        setInteraction(null);
         break;
     }
   }, [refreshUsage, flushStreaming, closeToolGroup]);
@@ -501,6 +523,9 @@ function App() {
     if (isRunning) return;
     void submitTask(option);
   };
+
+  // 只有最后一条 assistant 消息的选项可点，历史问答里的选项全部禁用
+  const lastAssistantId = [...messages].reverse().find((m) => m.kind === 'assistant')?.id;
 
   const handleSubmit = async () => {
     const task = input.trim();
@@ -611,6 +636,9 @@ function App() {
                 {currentSessionId.slice(0, 8)}
               </span>
             )}
+            <button className="btn-settings" onClick={() => setShowSkills(true)} title="技能管理">
+              <IconSkills />
+            </button>
             <button className="btn-settings" onClick={openSettings} title="设置">
               <IconSettings />
             </button>
@@ -631,7 +659,7 @@ function App() {
               key={msg.id}
               msg={msg}
               onSelectOption={handleSelectOption}
-              disabled={isRunning}
+              disabled={isRunning || msg.id !== lastAssistantId}
             />
           ))}
           {/* 流式输出气泡：文本累积在 ref 中，streamVersion 变化触发重渲染；done 后 flushStreaming 固化成正式消息 */}
@@ -691,6 +719,245 @@ function App() {
           onClose={() => setShowSettings(false)}
         />
       )}
+
+      {/* 技能管理弹窗 */}
+      {showSkills && (
+        <SkillsModal onClose={() => setShowSkills(false)} />
+      )}
+
+      {/* ask_question 提问模态（agent 阻塞等答案） */}
+      {interaction && (
+        <InteractionModal
+          questions={interaction.questions}
+          onSubmit={(answers) => {
+            void window.api.answerInteraction(interaction.id, answers);
+            setInteraction(null);
+          }}
+          onSkip={() => {
+            // 全部留空提交 → 工具侧 formatAnswers 记为 (no answer)，loop 继续
+            void window.api.answerInteraction(interaction.id, interaction.questions.map(() => ''));
+            setInteraction(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * 技能管理弹窗：左侧列表 + 右侧编辑表单；只操作用户全局技能
+ */
+function SkillsModal({ onClose }: { onClose: () => void }) {
+  const [list, setList] = useState<SkillSummary[]>([]);
+  /** 当前选中的技能名；null = 新建模式 */
+  const [selected, setSelected] = useState<string | null>(null);
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [content, setContent] = useState('');
+  const [message, setMessage] = useState('');
+  const nameValid = SKILL_NAME_RE.test(name.trim());
+
+  const refresh = useCallback(async () => {
+    setList(await window.api.listSkills());
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const select = async (s: SkillSummary) => {
+    const detail = await window.api.readSkill(s.name);
+    if (!detail) return;
+    setSelected(detail.name);
+    setName(detail.name);
+    setDescription(detail.description);
+    setContent(detail.content);
+    setMessage('');
+  };
+
+  const startNew = () => {
+    setSelected(null);
+    setName('');
+    setDescription('');
+    setContent('');
+    setMessage('');
+  };
+
+  const canSave = nameValid && description.trim().length > 0 && content.trim().length > 0;
+
+  const save = async () => {
+    const result = await window.api.saveSkill({
+      name: name.trim(),
+      description: description.trim(),
+      content: content.trim(),
+    });
+    setMessage(result.message);
+    if (result.ok) {
+      await refresh();
+      if (selected === null) {
+        // 新建成功才清空输入框，便于接着填下一个；提示信息保留让用户确认结果
+        setName('');
+        setDescription('');
+        setContent('');
+      } else {
+        setSelected(name.trim());
+      }
+    }
+  };
+
+  const remove = async () => {
+    if (!selected) return;
+    if (!window.confirm(`确定删除技能 "${selected}"？此操作不可恢复。`)) return;
+    const result = await window.api.deleteSkill(selected);
+    setMessage(result.message);
+    if (result.ok) {
+      await refresh();
+      startNew();
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal skills-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>技能管理</h2>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="skills-layout">
+          <aside className="skills-list">
+            <button className="skills-new" onClick={startNew}>＋ 新建技能</button>
+            {list.map((s) => (
+              <button
+                key={s.name}
+                className={`skills-item ${selected === s.name ? 'active' : ''}`}
+                onClick={() => select(s)}
+                title={s.description}
+              >
+                <span className="skills-item-name">{s.name}</span>
+                <span className="skills-item-desc">{s.description}</span>
+              </button>
+            ))}
+            {list.length === 0 && <div className="skills-empty">还没有技能</div>}
+          </aside>
+          <div className="skills-form">
+            <div className="form-field">
+              <label>技能名（小写字母/数字/连字符，创建后不可改）</label>
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                disabled={selected !== null}
+                placeholder="如 pdf-merge"
+              />
+              {!nameValid && name.length > 0 && (
+                <div className="form-hint" style={{ color: 'var(--danger, #ef4444)' }}>
+                  只允许小写字母、数字、连字符（1-64 位）
+                </div>
+              )}
+            </div>
+            <div className="form-field">
+              <label>一句话描述（会注入技能目录，供 Agent 判断何时使用）</label>
+              <input
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="如：合并多个 PDF 文件"
+              />
+            </div>
+            <div className="form-field skills-content-field">
+              <label>技能正文（Markdown：步骤、注意事项、脚本用法）</label>
+              <textarea
+                className="skills-content"
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                placeholder={'## 步骤\n1. …\n\n## 注意事项\n- …'}
+              />
+            </div>
+            {message && <div className="form-hint">{message}</div>}
+            <div className="modal-actions">
+              {selected && (
+                <button className="btn btn-cancel" onClick={remove}>删除</button>
+              )}
+              <button className="btn btn-send" onClick={save} disabled={!canSave}>
+                {selected ? '保存' : '创建'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * ask_question 提问模态：选项题渲染单选/多选，开放题渲染文本框
+ */
+function InteractionModal({ questions, onSubmit, onSkip }: {
+  questions: InteractionQuestion[];
+  onSubmit: (answers: string[]) => void;
+  onSkip: () => void;
+}) {
+  const [texts, setTexts] = useState<string[]>(() => questions.map(() => ''));
+  const [picked, setPicked] = useState<string[][]>(() => questions.map(() => []));
+
+  const allAnswered = questions.every((q, i) =>
+    q.options?.length ? picked[i].length > 0 : texts[i].trim().length > 0,
+  );
+
+  const submit = () => {
+    onSubmit(questions.map((q, i) => (q.options?.length ? picked[i].join(', ') : texts[i].trim())));
+  };
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal interaction-modal">
+        <div className="modal-title">Agent 提问</div>
+        <div className="interaction-questions">
+          {questions.map((q, i) => (
+            <div key={i} className="interaction-question">
+              {q.header && <div className="interaction-header">{q.header}</div>}
+              <div className="interaction-q">{q.question}</div>
+              {q.options?.length ? (
+                <div className="interaction-options">
+                  {q.options.map((opt) => {
+                    const checked = picked[i].includes(opt);
+                    return (
+                      <label key={opt} className={`interaction-option ${checked ? 'checked' : ''}`}>
+                        <input
+                          type={q.multiSelect ? 'checkbox' : 'radio'}
+                          name={`q-${i}`}
+                          checked={checked}
+                          onChange={() => {
+                            setPicked((prev) => {
+                              const next = [...prev];
+                              if (q.multiSelect) {
+                                next[i] = checked ? next[i].filter((o) => o !== opt) : [...next[i], opt];
+                              } else {
+                                next[i] = [opt];
+                              }
+                              return next;
+                            });
+                          }}
+                        />
+                        <span>{opt}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : (
+                <input
+                  className="interaction-input"
+                  value={texts[i]}
+                  onChange={(e) => setTexts((prev) => prev.map((t, j) => (j === i ? e.target.value : t)))}
+                  placeholder="输入回答…"
+                />
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="modal-actions">
+          <button className="btn btn-ghost" onClick={onSkip}>跳过</button>
+          <button className="btn btn-send" onClick={submit} disabled={!allAnswered}>提交</button>
+        </div>
+      </div>
     </div>
   );
 }

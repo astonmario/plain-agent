@@ -14,6 +14,10 @@ export { jobOutputTool, jobKillTool } from './job-tools';
 export { JobRegistry } from './jobs';
 export { updateMemoryTool } from './memory-tool';
 export { createHistoryLookupTool, createHistorySearchTool } from './history-lookup';
+export { webFetchTool, webSearchTool, htmlToMarkdown } from './web';
+export { browserUseTool } from './browser';
+export { askQuestionTool, ASK_TIMEOUT_MS } from './ask';
+export { useSkillTool, createSkillTool } from './skill';
 
 // 工具注册表
 import { readFileTool, writeFileTool, editFileTool } from './file';
@@ -23,6 +27,10 @@ import { listDirectoryTool, calculatorTool, datetimeTool } from './utility';
 import { exploreTool, globTool, grepTool } from './search';
 import { jobOutputTool, jobKillTool } from './job-tools';
 import { updateMemoryTool } from './memory-tool';
+import { webFetchTool, webSearchTool } from './web';
+import { browserUseTool } from './browser';
+import { askQuestionTool } from './ask';
+import { useSkillTool, createSkillTool } from './skill';
 import type { Tool } from '../types';
 
 /**
@@ -44,5 +52,11 @@ export function getBuiltinTools(): Tool[] {
     jobOutputTool,
     jobKillTool,
     updateMemoryTool,
+    webFetchTool,
+    webSearchTool,
+    browserUseTool,
+    askQuestionTool,
+    useSkillTool,
+    createSkillTool,
   ];
 }

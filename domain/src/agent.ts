@@ -22,6 +22,7 @@ import { HistoryManager } from './history-manager';
 import { createHistoryLookupTool, createHistorySearchTool } from './tools/history-lookup';
 import { JobRegistry } from './tools/jobs';
 import { DEFAULT_SYSTEM_PROMPT } from './prompt';
+import { discoverSkills, skillsCatalogPrompt } from './skills';
 import type {
   AgentConfig,
   AgentEvent,
@@ -180,6 +181,8 @@ export class PlainAgent extends EventEmitter {
     this.taskControllers.set(id, abortController);
 
     // 构建工具上下文
+    // 技能每任务重新扫描：新建/修改的技能下一条任务即可用
+    const skills = discoverSkills(process.cwd());
     const ctx: ToolContext = {
       signal: abortController.signal, // 用于取消任务执行
       sessionId: this.sessionId,
@@ -189,6 +192,7 @@ export class PlainAgent extends EventEmitter {
         return await this.checkPermission(tool, args); // 权限检查回调
       },
       jobs: this.jobs, // bash 后台任务注册表
+      skills, // 可用技能注册表（use_skill / create_skill 用）
     };
 
     // 发射任务开始事件
@@ -260,6 +264,18 @@ export class PlainAgent extends EventEmitter {
           content: `压缩完成（Level ${result.level}），当前 ${usage.tokens} tokens (${usage.percentage.toFixed(1)}%)`,
           timestamp: Date.now()
         });
+      }
+
+      // 注入技能目录到 system prompt（只改发送副本，不回写 fullMessages，避免污染持久化）
+      // 放在压缩之后：无论是否压缩，最终发送的 system 消息都带最新目录
+      const catalog = skillsCatalogPrompt(skills);
+      if (catalog) {
+        const sysIdx = messagesToSend.findIndex((m) => m.role === 'system');
+        if (sysIdx >= 0) {
+          messagesToSend = messagesToSend.map((m, i) =>
+            i === sysIdx ? { ...m, content: (m.content ?? '') + '\n' + catalog } : m
+          );
+        }
       }
 
       // 执行 ReAct 循环（核心逻辑在 loop.ts）

@@ -1,0 +1,425 @@
+/**
+ * TUI 顶层组件（架构借鉴 any-code/tui）
+ *
+ * - <Static> 放固化消息（ink 保证已渲染项不重渲）；流式文本累积在实时区，定稿后入 Static
+ * - 会话切换/清屏交给 cli 层重建 Ink 实例：fullStaticOutput 是 append-only，
+ *   同实例内无法清除已写入 scrollback 的旧消息（any-code 的教训）
+ */
+
+import React, { useEffect, useRef, useCallback, useState } from 'react';
+import { Box, Text, Static, useApp } from 'ink';
+import type { AgentEvent, PlainAgent, SessionStorage, Session } from '@plain-agent/domain';
+import { Message, MessageType } from '../types';
+import { MessageItem } from './MessageList';
+import InputBox, { Command } from './InputBox';
+import SessionSelect from './SessionSelect';
+import { InteractionWizard } from './InteractionWizard';
+
+export interface TuiInfo {
+  model: string;
+  baseUrl?: string;
+  toolCount: number;
+  persisted: boolean;
+  /** 当前项目目录（会话按项目隔离展示） */
+  project?: string;
+}
+
+interface AppProps {
+  createAgent: (sessionId?: string) => Promise<PlainAgent> | PlainAgent;
+  /** 用于 /resume 列会话；null 表示无持久化 */
+  storage: SessionStorage | null;
+  info: TuiInfo;
+  /** 恢复的会话 id；不传 = 新会话 */
+  sessionId?: string;
+  /** 恢复时是否回显历史消息（/clear 重建实例时为 false） */
+  echoHistory?: boolean;
+  /** cli 层重建 Ink 实例（unmount + 擦屏 + re-render） */
+  onSwitchSession: (sessionId?: string) => void;
+  /** cli 层擦屏重建（保留会话，清空消息显示） */
+  onClearScreen: () => void;
+}
+
+const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + '…' : s);
+
+export default function App(props: AppProps) {
+  const { exit } = useApp();
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [streamingText, setStreamingText] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [usage, setUsage] = useState<{ tokens: number; maxTokens: number } | null>(null);
+  const [interaction, setInteraction] = useState<{ id: string; questions: any[] } | null>(null);
+  const [sessionSelectMode, setSessionSelectMode] = useState(false);
+  const [sessionList, setSessionList] = useState<Session[]>([]);
+
+  const agentRef = useRef<PlainAgent | null>(null);
+  const idRef = useRef(0);
+  const streamRef = useRef('');
+  const toolBufRef = useRef<string[]>([]);
+  const initializedRef = useRef(false);
+
+  const addMessage = useCallback((type: MessageType, content: string) => {
+    idRef.current += 1;
+    const msg: Message = { id: `msg-${idRef.current}`, type, content, timestamp: Date.now() };
+    setMessages((prev) => [...prev, msg]);
+  }, []);
+
+  const flushTools = useCallback(() => {
+    if (toolBufRef.current.length > 0) {
+      addMessage(MessageType.TOOL, toolBufRef.current.join('\n'));
+      toolBufRef.current = [];
+    }
+  }, [addMessage]);
+
+  const flushStream = useCallback(() => {
+    if (streamRef.current) {
+      addMessage(MessageType.ASSISTANT, streamRef.current);
+      streamRef.current = '';
+      setStreamingText('');
+    }
+  }, [addMessage]);
+
+  const refreshUsage = useCallback(() => {
+    try {
+      const u = agentRef.current?.getHistoryUsage();
+      if (u) setUsage({ tokens: u.tokens, maxTokens: u.maxTokens });
+    } catch {
+      /* 忽略 */
+    }
+  }, []);
+
+  // 初始化 agent（含历史恢复）
+  useEffect(() => {
+    if (initializedRef.current) return;
+    initializedRef.current = true;
+    let cancelled = false;
+
+    const handler = (e: AgentEvent) => {
+      switch (e.type) {
+        case 'user':
+          flushTools();
+          addMessage(MessageType.USER, e.message);
+          break;
+        case 'text_delta':
+          streamRef.current += e.delta;
+          setStreamingText(streamRef.current);
+          break;
+        case 'assistant':
+          flushStream();
+          break;
+        case 'thinking':
+          addMessage(MessageType.THINKING, e.content);
+          break;
+        case 'tool_start':
+          toolBufRef.current.push(`🔧 ${e.tool} ${clip(JSON.stringify(e.args), 120)}`);
+          break;
+        case 'tool_result':
+          toolBufRef.current.push(`  ✅ ${clip(e.result, 200)} ${e.duration}ms`);
+          break;
+        case 'iteration':
+          flushTools();
+          flushStream();
+          addMessage(MessageType.ITERATION, `迭代 ${e.index}`);
+          break;
+        case 'compression':
+          addMessage(MessageType.SYSTEM, `历史压缩 Level ${e.level}: ${e.tokensBefore} → ${e.tokensAfter} tokens`);
+          refreshUsage();
+          break;
+        case 'session-warning':
+          addMessage(MessageType.WARNING, `会话警告: ${e.suggestion}`);
+          break;
+        case 'interaction':
+          flushTools();
+          flushStream();
+          setInteraction({ id: e.id, questions: e.questions });
+          break;
+        case 'error':
+          flushTools();
+          flushStream();
+          addMessage(MessageType.ERROR, e.error.message);
+          setIsProcessing(false);
+          setInteraction(null);
+          break;
+        case 'done':
+        case 'task-end':
+          flushTools();
+          flushStream();
+          setIsProcessing(false);
+          setInteraction(null);
+          refreshUsage();
+          break;
+        case 'stopped':
+          flushTools();
+          flushStream();
+          addMessage(MessageType.SYSTEM, '⏹ 已停止');
+          setIsProcessing(false);
+          setInteraction(null);
+          break;
+        case 'task-start':
+          setIsProcessing(true);
+          break;
+      }
+    };
+
+    (async () => {
+      const agent = await props.createAgent(props.sessionId);
+      if (cancelled) {
+        agent.destroy();
+        return;
+      }
+      agentRef.current = agent;
+      agent.on('event', handler);
+
+      if (props.sessionId) {
+        const count = await agent.loadHistory();
+        if (cancelled) return;
+        const sessId = agent.getSessionId();
+        addMessage(MessageType.SYSTEM, `已恢复会话 ${sessId.slice(0, 8)}（${count} 条历史）`);
+        if (props.echoHistory !== false) {
+          const history = agent
+            .getMessages()
+            .filter((m) => m.role === 'user' || m.role === 'assistant')
+            .map((m) => ({
+              role: m.role as 'user' | 'assistant',
+              content: typeof m.content === 'string' ? m.content : '',
+            }));
+          for (const h of history) {
+            addMessage(h.role === 'user' ? MessageType.USER : MessageType.ASSISTANT, h.content);
+          }
+        }
+      } else {
+        addMessage(
+          MessageType.SYSTEM,
+          `新会话 ${agent.getSessionId().slice(0, 8)} · ${props.info.model} · ${props.info.toolCount} 个工具${props.info.persisted ? '' : ' · 内存模式'}${props.info.project ? `\n项目: ${props.info.project}` : ''}`,
+        );
+      }
+      refreshUsage();
+    })().catch((err) => {
+      if (!cancelled) {
+        addMessage(MessageType.ERROR, `初始化 agent 失败: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      const agent = agentRef.current;
+      if (agent) {
+        agent.off('event', handler);
+        agent.destroy();
+        agentRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Ctrl+C：运行中停止，空闲退出（InputBox/向导把 Esc/Ctrl+C 都路由到这里或自己处理）
+  const handleCancel = useCallback(() => {
+    if (isProcessing && agentRef.current) {
+      addMessage(MessageType.SYSTEM, 'Stopping agent...');
+      agentRef.current.stop();
+    } else {
+      exit();
+    }
+  }, [isProcessing, addMessage, exit]);
+
+  const switchSession = useCallback(
+    (sessionId?: string) => {
+      setSessionSelectMode(false);
+      setSessionList([]);
+      props.onSwitchSession(sessionId);
+    },
+    [props],
+  );
+
+  const getCommands = useCallback((): Command[] => {
+    return [
+      {
+        name: '/help',
+        description: '显示帮助',
+        handler: () => {
+          addMessage(
+            MessageType.SYSTEM,
+            [
+              '可用命令:',
+              '  /resume   恢复历史会话',
+              '  /new      开新会话',
+              '  /clear    清屏',
+              '  /usage    历史 token 用量',
+              '  /compress 手动压缩历史',
+              '  /stop     停止当前任务',
+              '  /exit     退出',
+            ].join('\n'),
+          );
+        },
+      },
+      {
+        name: '/resume',
+        description: '恢复历史会话',
+        handler: () => {
+          void (async () => {
+            const sessions = props.storage ? await props.storage.listSessions() : [];
+            if (sessions.length === 0) {
+              addMessage(MessageType.SYSTEM, '没有可恢复的会话。');
+              return;
+            }
+            if (sessions.length === 1) {
+              switchSession(sessions[0].id);
+              return;
+            }
+            setSessionList(sessions);
+            setSessionSelectMode(true);
+          })();
+        },
+      },
+      {
+        name: '/new',
+        description: '开新会话',
+        handler: () => switchSession(undefined),
+      },
+      {
+        name: '/clear',
+        description: '清屏',
+        handler: () => props.onClearScreen(),
+      },
+      {
+        name: '/usage',
+        description: '历史 token 用量',
+        handler: () => {
+          refreshUsage();
+          if (usage) {
+            addMessage(MessageType.SYSTEM, `历史用量: ${usage.tokens}/${usage.maxTokens} tokens (${((usage.tokens / usage.maxTokens) * 100).toFixed(1)}%)`);
+          }
+        },
+      },
+      {
+        name: '/compress',
+        description: '手动压缩历史',
+        handler: () => {
+          void (async () => {
+            try {
+              await agentRef.current?.compressHistory();
+              addMessage(MessageType.SYSTEM, '压缩完成');
+            } catch (err) {
+              addMessage(MessageType.ERROR, `压缩失败: ${err instanceof Error ? err.message : String(err)}`);
+            }
+            refreshUsage();
+          })();
+        },
+      },
+      {
+        name: '/stop',
+        description: '停止当前任务',
+        handler: () => agentRef.current?.stop(),
+      },
+      {
+        name: '/exit',
+        description: '退出',
+        handler: () => exit(),
+      },
+    ];
+  }, [addMessage, exit, props, refreshUsage, switchSession, usage]);
+
+  const handleSubmit = (value: string) => {
+    if (sessionSelectMode) return;
+
+    if (isProcessing) {
+      addMessage(MessageType.ERROR, '请等待当前任务完成。');
+      return;
+    }
+
+    // 斜杠命令（候选已在 InputBox 内联展示，这里处理 Enter 提交）
+    if (value.startsWith('/')) {
+      const query = value.slice(1).trim();
+      const cmds = getCommands();
+      const exact = cmds.find((c) => c.name === '/' + query);
+      if (exact) {
+        Promise.resolve(exact.handler()).catch((err) => {
+          addMessage(MessageType.ERROR, `命令执行失败: ${err instanceof Error ? err.message : String(err)}`);
+        });
+        return;
+      }
+      const partial = cmds.filter((c) => c.name.startsWith('/' + query.toLowerCase()));
+      if (partial.length === 1) {
+        Promise.resolve(partial[0].handler()).catch((err) => {
+          addMessage(MessageType.ERROR, `命令执行失败: ${err instanceof Error ? err.message : String(err)}`);
+        });
+        return;
+      }
+      if (partial.length > 1) {
+        addMessage(MessageType.SYSTEM, `多个命令匹配 "/${query}"，按 Tab 补全`);
+        return;
+      }
+      addMessage(MessageType.SYSTEM, `未知命令: /${query}`);
+      return;
+    }
+
+    if (!agentRef.current) {
+      addMessage(MessageType.ERROR, 'Agent 未就绪，请稍后再试。');
+      return;
+    }
+
+    addMessage(MessageType.USER, value);
+    setIsProcessing(true);
+    agentRef.current.submit(value).catch((err) => {
+      if (err instanceof Error && err.name !== 'AbortError') {
+        addMessage(MessageType.ERROR, `提交失败: ${err.message}`);
+      }
+    });
+  };
+
+  return (
+    <Box flexDirection="column" height="100%">
+      <Static items={messages}>
+        {(message) => <MessageItem key={message.id} message={message} />}
+      </Static>
+
+      {isProcessing && (
+        <Box>
+          <Text color="#F59E0B">{'✻ 处理中… '}</Text>
+          {usage && (
+            <Text dimColor>
+              {usage.tokens}/{usage.maxTokens} tok
+            </Text>
+          )}
+        </Box>
+      )}
+
+      {streamingText ? (
+        <Box flexDirection="column" marginBottom={1}>
+          <Text color="#10B981" bold>
+            {' '}● Assistant
+          </Text>
+          <Box paddingLeft={3}>
+            <Text wrap="wrap">{streamingText}</Text>
+          </Box>
+        </Box>
+      ) : null}
+
+      {sessionSelectMode && (
+        <SessionSelect
+          sessions={sessionList}
+          onSelect={(sid) => switchSession(sid)}
+          onCancel={() => {
+            setSessionSelectMode(false);
+            setSessionList([]);
+          }}
+        />
+      )}
+
+      {interaction ? (
+        <InteractionWizard
+          id={interaction.id}
+          questions={interaction.questions}
+          onDone={() => setInteraction(null)}
+        />
+      ) : (
+        <InputBox
+          onSubmit={handleSubmit}
+          onCancel={handleCancel}
+          commands={getCommands()}
+          active={!sessionSelectMode}
+          placeholder={isProcessing ? '处理中…（Ctrl+C 停止）' : '输入任务，回车执行；/help 查看命令'}
+        />
+      )}
+    </Box>
+  );
+}

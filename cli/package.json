@@ -6,14 +6,24 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "dev": "tsx src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "dev": "tsx src/cli.tsx",
+    "typecheck": "tsc --noEmit",
+    "start": "tsx src/cli.tsx",
+    "test:smoke": "tsx test/smoke-tui.tsx",
+    "test:integration": "tsx test/integration-tui.tsx",
+    "test": "pnpm run typecheck && pnpm run test:smoke && pnpm run test:integration"
   },
   "dependencies": {
-    "@plain-agent/domain": "workspace:*"
+    "@plain-agent/domain": "workspace:*",
+    "ink": "^7.1.1",
+    "ink-text-input": "^6.0.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
   },
   "devDependencies": {
     "@types/node": "^20.10.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3"
   }

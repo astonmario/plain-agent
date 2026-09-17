@@ -18,9 +18,20 @@ import { resolve, join } from 'path';
 import { homedir } from 'os';
 import App from './components/App';
 
-/** 依次尝试 cwd/.env → ~/.plain-agent/.env（已有的 key 不覆盖） */
+/**
+ * 从 cwd 向上逐级找 .env（就近优先），找不到再用 ~/.plain-agent/.env 兜底。
+ * pnpm --filter 启动时 cwd 是包目录，需要向上找才能命中项目根目录的 .env
+ */
 function loadEnv(): void {
-  const candidates = [resolve(process.cwd(), '.env'), join(homedir(), '.plain-agent', '.env')];
+  const candidates: string[] = [];
+  let dir = process.cwd();
+  while (true) {
+    candidates.push(join(dir, '.env'));
+    const parent = resolve(dir, '..');
+    if (parent === dir) break;
+    dir = parent;
+  }
+  candidates.push(join(homedir(), '.plain-agent', '.env'));
   for (const envPath of candidates) {
     if (!existsSync(envPath)) continue;
     try {

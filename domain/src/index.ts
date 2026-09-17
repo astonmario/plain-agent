@@ -20,6 +20,7 @@ export {
   unregisterInteraction,
   submitInteractionAnswer,
   pendingInteractionCount,
+  hasPendingInteraction,
 } from './interactions';
 export {
   discoverSkills,

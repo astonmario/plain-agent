@@ -8,7 +8,9 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "start": "tsx src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:smoke": "tsx test/smoke-server.ts",
+    "test": "npm run typecheck && npm run test:smoke"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.4",

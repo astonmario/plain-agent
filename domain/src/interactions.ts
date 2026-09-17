@@ -34,3 +34,8 @@ export function submitInteractionAnswer(id: string, answers: string[]): void {
 export function pendingInteractionCount(): number {
   return pending.size;
 }
+
+/** 重放事件流时判断交互是否仍在等待答案（已回答/超时的不重放，避免客户端重复弹窗） */
+export function hasPendingInteraction(id: string): boolean {
+  return pending.has(id);
+}

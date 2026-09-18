@@ -8,12 +8,17 @@ import { Message, MessageType } from '../src/types';
 import { MessageItem } from '../src/components/MessageList';
 import SessionSelect from '../src/components/SessionSelect';
 import { InteractionWizard } from '../src/components/InteractionWizard';
+import Spinner from '../src/components/Spinner';
 
 let pass = 0, fail = 0;
 function check(name: string, cond: boolean, extra = '') {
   if (cond) { pass++; console.log(`  ok  ${name}`); }
   else { fail++; console.log(`FAIL  ${name} ${extra}`); }
 }
+
+// 转圈指示器：renderToString 至少吐出一个 braille 帧字符
+const spinOut = renderToString(<Spinner />);
+check('Spinner 渲染', /⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏/.test(spinOut), spinOut.slice(0, 40));
 
 // 消息渲染（各类型）
 for (const t of [MessageType.USER, MessageType.ASSISTANT, MessageType.TOOL, MessageType.ERROR]) {

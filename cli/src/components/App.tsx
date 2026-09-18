@@ -11,6 +11,7 @@ import { Box, Text, Static, useApp } from 'ink';
 import type { AgentEvent, PlainAgent, SessionStorage, Session } from '@plain-agent/domain';
 import { Message, MessageType } from '../types';
 import { MessageItem } from './MessageList';
+import Spinner from './Spinner';
 import InputBox, { Command } from './InputBox';
 import SessionSelect from './SessionSelect';
 import { InteractionWizard } from './InteractionWizard';
@@ -240,6 +241,7 @@ export default function App(props: AppProps) {
             MessageType.SYSTEM,
             [
               '可用命令:',
+              '  /history  查看历史会话列表',
               '  /resume   恢复历史会话',
               '  /new      开新会话',
               '  /clear    清屏',
@@ -249,6 +251,36 @@ export default function App(props: AppProps) {
               '  /exit     退出',
             ].join('\n'),
           );
+        },
+      },
+      {
+        name: '/history',
+        description: '查看历史会话列表',
+        handler: () => {
+          void (async () => {
+            if (!props.storage) {
+              addMessage(MessageType.SYSTEM, '内存模式：无历史会话。');
+              return;
+            }
+            const sessions = await props.storage.listSessions();
+            if (sessions.length === 0) {
+              addMessage(MessageType.SYSTEM, '没有历史会话。');
+              return;
+            }
+            const currentId = agentRef.current?.getSessionId();
+            const lines: string[] = [];
+            for (let i = 0; i < sessions.length; i++) {
+              const s = sessions[i];
+              const msgs = await props.storage!.loadMessages(s.id).catch(() => [] as unknown[]);
+              const mark = s.id === currentId ? '●' : ' ';
+              const time = new Date(s.updatedAt).toLocaleString();
+              lines.push(
+                ` ${mark} ${String(i + 1).padStart(2)}. ${s.title || '(未命名)'}  ${msgs.length} 条消息  ${time}`,
+              );
+            }
+            lines.push('', '用 /resume 选择恢复并查看对话内容');
+            addMessage(MessageType.SYSTEM, lines.join('\n'));
+          })();
         },
       },
       {
@@ -357,7 +389,7 @@ export default function App(props: AppProps) {
       return;
     }
 
-    addMessage(MessageType.USER, value);
+    // 用户消息由 agent 的 'user' 事件渲染（domain loop 会发），这里不本地添加，避免重复
     setIsProcessing(true);
     agentRef.current.submit(value).catch((err) => {
       if (err instanceof Error && err.name !== 'AbortError') {
@@ -374,7 +406,8 @@ export default function App(props: AppProps) {
 
       {isProcessing && (
         <Box>
-          <Text color="#F59E0B">{'✻ 处理中… '}</Text>
+          <Spinner color="#F59E0B" />
+          <Text color="#F59E0B">{' 处理中… '}</Text>
           {usage && (
             <Text dimColor>
               {usage.tokens}/{usage.maxTokens} tok

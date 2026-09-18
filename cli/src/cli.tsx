@@ -17,6 +17,7 @@ import { readFileSync, existsSync, mkdirSync } from 'fs';
 import { resolve, join } from 'path';
 import { homedir } from 'os';
 import App from './components/App';
+import { TUI_SYSTEM_PROMPT } from './prompt';
 
 /**
  * 从 cwd 向上逐级找 .env（就近优先），找不到再用 ~/.plain-agent/.env 兜底。
@@ -96,6 +97,7 @@ function createAgent(sessionId?: string): PlainAgent {
     tools: getBuiltinTools(),
     storage,
     sessionId,
+    systemPrompt: TUI_SYSTEM_PROMPT,
     permissionMode: (process.env.PERMISSION_MODE as PermissionMode) || 'trust',
     maxIterations: 150,
     historyManagement: {

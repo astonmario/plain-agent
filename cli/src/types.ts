@@ -18,4 +18,6 @@ export interface Message {
   type: MessageType;
   content: string;
   timestamp: number;
+  /** 回复中解析出的可选项（options 代码块），仅 ASSISTANT 消息可能有 */
+  options?: string[];
 }

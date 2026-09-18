@@ -12,6 +12,8 @@ import type { AgentEvent, PlainAgent, SessionStorage, Session } from '@plain-age
 import { Message, MessageType } from '../types';
 import { MessageItem } from './MessageList';
 import Spinner from './Spinner';
+import OptionsPicker from './OptionsPicker';
+import { parseOptionsBlock } from '../options';
 import InputBox, { Command } from './InputBox';
 import SessionSelect from './SessionSelect';
 import { InteractionWizard } from './InteractionWizard';
@@ -51,6 +53,8 @@ export default function App(props: AppProps) {
   const [interaction, setInteraction] = useState<{ id: string; questions: any[] } | null>(null);
   const [sessionSelectMode, setSessionSelectMode] = useState(false);
   const [sessionList, setSessionList] = useState<Session[]>([]);
+  /** 最新一条带 options 块的回复：接管输入，键盘选择后作为新任务提交 */
+  const [pendingOptions, setPendingOptions] = useState<{ messageId: string; options: string[] } | null>(null);
 
   const agentRef = useRef<PlainAgent | null>(null);
   const idRef = useRef(0);
@@ -58,10 +62,11 @@ export default function App(props: AppProps) {
   const toolBufRef = useRef<string[]>([]);
   const initializedRef = useRef(false);
 
-  const addMessage = useCallback((type: MessageType, content: string) => {
+  const addMessage = useCallback((type: MessageType, content: string, options?: string[]): string => {
     idRef.current += 1;
-    const msg: Message = { id: `msg-${idRef.current}`, type, content, timestamp: Date.now() };
+    const msg: Message = { id: `msg-${idRef.current}`, type, content, timestamp: Date.now(), options };
     setMessages((prev) => [...prev, msg]);
+    return msg.id;
   }, []);
 
   const flushTools = useCallback(() => {
@@ -73,7 +78,10 @@ export default function App(props: AppProps) {
 
   const flushStream = useCallback(() => {
     if (streamRef.current) {
-      addMessage(MessageType.ASSISTANT, streamRef.current);
+      const { text, options } = parseOptionsBlock(streamRef.current);
+      const id = addMessage(MessageType.ASSISTANT, text, options ?? undefined);
+      // 带可选项的回复：接管输入转键盘选择，直到选中/取消/下一条消息
+      if (options) setPendingOptions({ messageId: id, options });
       streamRef.current = '';
       setStreamingText('');
     }
@@ -184,7 +192,12 @@ export default function App(props: AppProps) {
               content: typeof m.content === 'string' ? m.content : '',
             }));
           for (const h of history) {
-            addMessage(h.role === 'user' ? MessageType.USER : MessageType.ASSISTANT, h.content);
+            if (h.role === 'user') {
+              addMessage(MessageType.USER, h.content);
+            } else {
+              const { text, options } = parseOptionsBlock(h.content);
+              addMessage(MessageType.ASSISTANT, text, options ?? undefined);
+            }
           }
         }
       } else {
@@ -350,6 +363,24 @@ export default function App(props: AppProps) {
     ];
   }, [addMessage, exit, props, refreshUsage, switchSession, usage]);
 
+  /** 提交任务（用户消息由 agent 的 'user' 事件渲染，这里不本地添加，避免重复） */
+  const runTask = useCallback(
+    (value: string) => {
+      if (!agentRef.current) {
+        addMessage(MessageType.ERROR, 'Agent 未就绪，请稍后再试。');
+        return;
+      }
+      setPendingOptions(null);
+      setIsProcessing(true);
+      agentRef.current.submit(value).catch((err) => {
+        if (err instanceof Error && err.name !== 'AbortError') {
+          addMessage(MessageType.ERROR, `提交失败: ${err.message}`);
+        }
+      });
+    },
+    [addMessage],
+  );
+
   const handleSubmit = (value: string) => {
     if (sessionSelectMode) return;
 
@@ -384,24 +415,19 @@ export default function App(props: AppProps) {
       return;
     }
 
-    if (!agentRef.current) {
-      addMessage(MessageType.ERROR, 'Agent 未就绪，请稍后再试。');
-      return;
-    }
-
-    // 用户消息由 agent 的 'user' 事件渲染（domain loop 会发），这里不本地添加，避免重复
-    setIsProcessing(true);
-    agentRef.current.submit(value).catch((err) => {
-      if (err instanceof Error && err.name !== 'AbortError') {
-        addMessage(MessageType.ERROR, `提交失败: ${err.message}`);
-      }
-    });
+    runTask(value);
   };
 
   return (
     <Box flexDirection="column" height="100%">
       <Static items={messages}>
-        {(message) => <MessageItem key={message.id} message={message} />}
+        {(message) => (
+          <MessageItem
+            key={message.id}
+            message={message}
+            hideOptions={pendingOptions?.messageId === message.id && !isProcessing}
+          />
+        )}
       </Static>
 
       {isProcessing && (
@@ -443,6 +469,12 @@ export default function App(props: AppProps) {
           id={interaction.id}
           questions={interaction.questions}
           onDone={() => setInteraction(null)}
+        />
+      ) : pendingOptions && !isProcessing && !sessionSelectMode ? (
+        <OptionsPicker
+          options={pendingOptions.options}
+          onSelect={(opt) => runTask(opt)}
+          onDismiss={() => setPendingOptions(null)}
         />
       ) : (
         <InputBox

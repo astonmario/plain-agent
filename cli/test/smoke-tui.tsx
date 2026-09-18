@@ -9,6 +9,8 @@ import { MessageItem } from '../src/components/MessageList';
 import SessionSelect from '../src/components/SessionSelect';
 import { InteractionWizard } from '../src/components/InteractionWizard';
 import Spinner from '../src/components/Spinner';
+import OptionsPicker from '../src/components/OptionsPicker';
+import { parseOptionsBlock } from '../src/options';
 
 let pass = 0, fail = 0;
 function check(name: string, cond: boolean, extra = '') {
@@ -19,6 +21,26 @@ function check(name: string, cond: boolean, extra = '') {
 // 转圈指示器：renderToString 至少吐出一个 braille 帧字符
 const spinOut = renderToString(<Spinner />);
 check('Spinner 渲染', /⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏/.test(spinOut), spinOut.slice(0, 40));
+
+// options 代码块解析
+const p1 = parseOptionsBlock('好的，可以这样做。\n\n```options\nA 方案\n- B 方案\n1. C 方案\n```');
+check('options 解析', p1.options?.length === 3 && p1.options[1] === 'B 方案' && p1.options[2] === 'C 方案', JSON.stringify(p1));
+check('options 块从正文剥离', !p1.text.includes('```') && p1.text.includes('好的'));
+check('无块返回原文', parseOptionsBlock('普通回复').options === null);
+check('空块视为无选项', parseOptionsBlock('x\n```options\n```').options === null);
+
+// options 列表渲染（历史区 dimmed 展示）
+const optMsg: Message = { id: 'm2', type: MessageType.ASSISTANT, content: p1.text, timestamp: Date.now(), options: p1.options! };
+const optOut = renderToString(<MessageItem message={optMsg} />);
+check('MessageItem 渲染选项列表', optOut.includes('○') && optOut.includes('A 方案'));
+const hiddenOut = renderToString(<MessageItem message={optMsg} hideOptions />);
+check('hideOptions 隐藏选项列表', !hiddenOut.includes('○ A 方案'));
+
+// 选项选择器
+const pickerOut = renderToString(
+  <OptionsPicker options={['甲', '乙']} onSelect={() => {}} onDismiss={() => {}} />,
+);
+check('OptionsPicker 渲染', pickerOut.includes('❯ 甲') && pickerOut.includes('  乙') && pickerOut.includes('Esc'));
 
 // 消息渲染（各类型）
 for (const t of [MessageType.USER, MessageType.ASSISTANT, MessageType.TOOL, MessageType.ERROR]) {

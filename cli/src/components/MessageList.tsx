@@ -36,9 +36,11 @@ function formatTimestamp(timestamp: number): string {
   return `${hh}:${mm}:${ss}`;
 }
 
-export function MessageItem({ message, showTimestamp = true }: {
+export function MessageItem({ message, showTimestamp = true, hideOptions = false }: {
   message: Message;
   showTimestamp?: boolean;
+  /** 可选项正被 OptionsPicker 接管选择时隐藏列表，避免重复显示 */
+  hideOptions?: boolean;
 }) {
   const color = TYPE_COLORS[message.type];
   const label = TYPE_LABELS[message.type];
@@ -59,6 +61,14 @@ export function MessageItem({ message, showTimestamp = true }: {
       <Box paddingLeft={showTimestamp ? 12 : 0}>
         <Text wrap="wrap">{message.content}</Text>
       </Box>
+      {!hideOptions &&
+        message.options?.map((opt, i) => (
+          <Text key={i} dimColor>
+            {' '}
+            {'   '}
+            {'○'} {opt}
+          </Text>
+        ))}
     </Box>
   );
 }

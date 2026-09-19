@@ -9,7 +9,7 @@
 import React, { useEffect, useRef, useCallback, useState } from 'react';
 import { Box, Text, Static, useApp } from 'ink';
 import type { AgentEvent, PlainAgent, SessionStorage, Session } from '@plain-agent/domain';
-import { Message, MessageType } from '../types';
+import { Message, MessageType, ToolCall } from '../types';
 import { MessageItem } from './MessageList';
 import Spinner from './Spinner';
 import OptionsPicker from './OptionsPicker';
@@ -17,6 +17,7 @@ import { parseOptionsBlock } from '../options';
 import InputBox, { Command } from './InputBox';
 import SessionSelect from './SessionSelect';
 import { InteractionWizard } from './InteractionWizard';
+import { ToolCallDisplay } from './ToolCallDisplay';
 
 export interface TuiInfo {
   model: string;
@@ -55,11 +56,14 @@ export default function App(props: AppProps) {
   const [sessionList, setSessionList] = useState<Session[]>([]);
   /** 最新一条带 options 块的回复：接管输入，键盘选择后作为新任务提交 */
   const [pendingOptions, setPendingOptions] = useState<{ messageId: string; options: string[] } | null>(null);
+  /** 当前批次的工具调用 */
+  const [toolCalls, setToolCalls] = useState<ToolCall[]>([]);
 
   const agentRef = useRef<PlainAgent | null>(null);
   const idRef = useRef(0);
   const streamRef = useRef('');
-  const toolBufRef = useRef<string[]>([]);
+  const toolCallsRef = useRef<Map<string, ToolCall>>(new Map());
+  const toolIdCounter = useRef(0);
   const initializedRef = useRef(false);
 
   const addMessage = useCallback((type: MessageType, content: string, options?: string[]): string => {
@@ -70,11 +74,12 @@ export default function App(props: AppProps) {
   }, []);
 
   const flushTools = useCallback(() => {
-    if (toolBufRef.current.length > 0) {
-      addMessage(MessageType.TOOL, toolBufRef.current.join('\n'));
-      toolBufRef.current = [];
+    if (toolCallsRef.current.size > 0) {
+      const calls = Array.from(toolCallsRef.current.values());
+      setToolCalls(calls);
+      toolCallsRef.current.clear();
     }
-  }, [addMessage]);
+  }, []);
 
   const flushStream = useCallback(() => {
     if (streamRef.current) {
@@ -119,10 +124,32 @@ export default function App(props: AppProps) {
           addMessage(MessageType.THINKING, e.content);
           break;
         case 'tool_start':
-          toolBufRef.current.push(`🔧 ${e.tool} ${clip(JSON.stringify(e.args), 120)}`);
+          toolIdCounter.current += 1;
+          const toolId = `tool-${toolIdCounter.current}`;
+          toolCallsRef.current.set(toolId, {
+            id: toolId,
+            tool: e.tool,
+            args: e.args,
+            status: 'running',
+          });
+          setToolCalls(Array.from(toolCallsRef.current.values()));
           break;
         case 'tool_result':
-          toolBufRef.current.push(`  ✅ ${clip(e.result, 200)} ${e.duration}ms`);
+          // 查找对应的 tool_start，更新结果（从后往前找最近的匹配项）
+          const toolsArray = Array.from(toolCallsRef.current.values());
+          let foundTool: ToolCall | undefined;
+          for (let i = toolsArray.length - 1; i >= 0; i--) {
+            if (toolsArray[i].tool === e.tool && toolsArray[i].status === 'running') {
+              foundTool = toolsArray[i];
+              break;
+            }
+          }
+          if (foundTool) {
+            foundTool.result = e.result;
+            foundTool.duration = e.duration;
+            foundTool.status = 'success';
+            setToolCalls([...toolCallsRef.current.values()]);
+          }
           break;
         case 'iteration':
           flushTools();
@@ -425,10 +452,19 @@ export default function App(props: AppProps) {
           <MessageItem
             key={message.id}
             message={message}
-            hideOptions={pendingOptions?.messageId === message.id && !isProcessing}
+            showTimestamp={false}
           />
         )}
       </Static>
+
+      {/* 工具调用显示 */}
+      {toolCalls.length > 0 && (
+        <Box flexDirection="column" marginBottom={1}>
+          {toolCalls.map((call) => (
+            <ToolCallDisplay key={call.id} call={call} />
+          ))}
+        </Box>
+      )}
 
       {isProcessing && (
         <Box>
@@ -445,9 +481,9 @@ export default function App(props: AppProps) {
       {streamingText ? (
         <Box flexDirection="column" marginBottom={1}>
           <Text color="#10B981" bold>
-            {' '}● Assistant
+            ● Assistant
           </Text>
-          <Box paddingLeft={3}>
+          <Box paddingLeft={0}>
             <Text wrap="wrap">{streamingText}</Text>
           </Box>
         </Box>

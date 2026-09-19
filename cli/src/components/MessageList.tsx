@@ -19,56 +19,56 @@ const TYPE_COLORS: Record<MessageType, string> = {
 
 const TYPE_LABELS: Record<MessageType, string> = {
   [MessageType.SYSTEM]: '●',
-  [MessageType.USER]: '你',
-  [MessageType.TOOL]: '◈',
+  [MessageType.USER]: 'You:',
+  [MessageType.TOOL]: '',
   [MessageType.ITERATION]: '↺',
-  [MessageType.ASSISTANT]: '●',
-  [MessageType.THINKING]: '◆',
-  [MessageType.ERROR]: '✖',
+  [MessageType.ASSISTANT]: '● Assistant',
+  [MessageType.THINKING]: '◆ Thinking',
+  [MessageType.ERROR]: '✗',
   [MessageType.WARNING]: '⚠',
 };
 
-function formatTimestamp(timestamp: number): string {
-  const d = new Date(timestamp);
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  const ss = String(d.getSeconds()).padStart(2, '0');
-  return `${hh}:${mm}:${ss}`;
-}
-
-export function MessageItem({ message, showTimestamp = true, hideOptions = false }: {
+export function MessageItem({ message, showTimestamp = false }: {
   message: Message;
   showTimestamp?: boolean;
-  /** 可选项正被 OptionsPicker 接管选择时隐藏列表，避免重复显示 */
-  hideOptions?: boolean;
 }) {
   const color = TYPE_COLORS[message.type];
   const label = TYPE_LABELS[message.type];
 
+  // 工具消息特殊处理，不显示在这里（由 ToolCallDisplay 处理）
+  if (message.type === MessageType.TOOL) {
+    return null;
+  }
+
   return (
     <Box flexDirection="column" marginBottom={1}>
-      <Box>
-        {showTimestamp && (
-          <Text color="#9CA3AF" dimColor>
-            [{formatTimestamp(message.timestamp)}]
-          </Text>
-        )}
+      {/* 用户和 Assistant 消息显示角色标识 */}
+      {(message.type === MessageType.USER || message.type === MessageType.ASSISTANT) && (
         <Text color={color} bold>
-          {' '}
-          {label} {message.type}
+          {label}
+        </Text>
+      )}
+
+      {/* 系统、错误、警告等其他消息类型 */}
+      {message.type !== MessageType.USER && message.type !== MessageType.ASSISTANT && (
+        <Text color={color} bold>
+          {label} {message.type !== MessageType.SYSTEM && message.type !== MessageType.THINKING ? message.type : ''}
+        </Text>
+      )}
+
+      {/* 消息内容 */}
+      <Box paddingLeft={message.type === MessageType.USER || message.type === MessageType.ASSISTANT ? 0 : 3}>
+        <Text wrap="wrap" dimColor={message.type === MessageType.SYSTEM}>
+          {message.content}
         </Text>
       </Box>
-      <Box paddingLeft={showTimestamp ? 12 : 0}>
-        <Text wrap="wrap">{message.content}</Text>
-      </Box>
-      {!hideOptions &&
-        message.options?.map((opt, i) => (
-          <Text key={i} dimColor>
-            {' '}
-            {'   '}
-            {'○'} {opt}
-          </Text>
-        ))}
+
+      {/* 可选项列表 - 始终显示，不再隐藏 */}
+      {message.options?.map((opt, i) => (
+        <Box key={i} paddingLeft={2}>
+          <Text dimColor>○ {opt}</Text>
+        </Box>
+      ))}
     </Box>
   );
 }

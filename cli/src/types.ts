@@ -21,3 +21,18 @@ export interface Message {
   /** 回复中解析出的可选项（options 代码块），仅 ASSISTANT 消息可能有 */
   options?: string[];
 }
+
+/** 工具调用状态 */
+export type ToolCallStatus = 'running' | 'success' | 'error';
+
+/** 工具调用信息 */
+export interface ToolCall {
+  id: string;
+  tool: string;
+  args: Record<string, unknown>;
+  description?: string;
+  result?: string;
+  resultSummary?: string;
+  duration?: number;
+  status: ToolCallStatus;
+}

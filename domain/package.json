@@ -21,13 +21,18 @@
     "typecheck": "tsc --noEmit",
     "test:history": "tsx test/test-history.ts",
     "test:anchor": "tsx test/test-anchor.ts",
-    "test:compression": "tsx test/test-smart-compression.ts"
+    "test:compression": "tsx test/test-smart-compression.ts",
+    "test:mcp": "tsx test/test-mcp.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "iconv-lite": "^0.7.3",
-    "playwright-core": "^1.49.0"
+    "js-yaml": "^5.4.3",
+    "playwright-core": "^1.49.0",
+    "undici": "^8.11.2"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.10.5",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3"

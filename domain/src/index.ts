@@ -16,6 +16,14 @@ export {
   createSkillTool,
 } from './tools';
 export {
+  loadMcpTools,
+  loadProjectMcp,
+  closeIdleConnections,
+  resetPool,
+  poolStats,
+} from './mcp';
+export { applyProxyConfig } from './proxy';
+export {
   registerInteraction,
   unregisterInteraction,
   submitInteractionAnswer,
@@ -61,3 +69,9 @@ export type { HistoryConfig } from './history-manager';
 export type { ConversationAnchor } from './anchor';
 export type { SessionHealth } from './compression-trigger';
 export type { SkillCrudResult } from './skills';
+export type {
+  McpServerConfig,
+  StdioServerConfig,
+  SseServerConfig,
+  McpManager,
+} from './mcp';

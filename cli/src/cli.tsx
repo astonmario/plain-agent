@@ -11,8 +11,8 @@
 
 import React from 'react';
 import { render } from 'ink';
-import { PlainAgent, SQLiteStorage, MemoryStorage, getBuiltinTools } from '@plain-agent/domain';
-import type { SessionStorage, PermissionMode } from '@plain-agent/domain';
+import { PlainAgent, SQLiteStorage, MemoryStorage, getBuiltinTools, loadMcpTools, loadProjectMcp } from '@plain-agent/domain';
+import type { SessionStorage, PermissionMode, Tool } from '@plain-agent/domain';
 import { readFileSync, existsSync, mkdirSync } from 'fs';
 import { resolve, join } from 'path';
 import { homedir } from 'os';
@@ -78,10 +78,33 @@ try {
   storage = new MemoryStorage();
 }
 
+// 加载 MCP 工具（启动时加载，所有 agent 实例共享）
+let mcpTools: Tool[] = [];
+let mcpCleanup: (() => Promise<void>) | null = null;
+
+async function loadMcp(): Promise<void> {
+  try {
+    const mcpConfig = loadProjectMcp(process.cwd());
+    if (Object.keys(mcpConfig).length > 0) {
+      console.log('🔌 加载 MCP 服务器...');
+      const mcpManager = await loadMcpTools(mcpConfig);
+      mcpTools = mcpManager.tools;
+      mcpCleanup = mcpManager.cleanup;
+      if (mcpTools.length > 0) {
+        console.log(`✅ 已加载 ${mcpTools.length} 个 MCP 工具`);
+      }
+    }
+  } catch (err) {
+    console.warn('⚠️  MCP 加载失败:', (err as Error).message);
+    mcpTools = [];
+    mcpCleanup = null;
+  }
+}
+
 const info = {
   model: process.env.MODEL || 'deepseek-chat',
   baseUrl: process.env.BASE_URL,
-  toolCount: getBuiltinTools().length,
+  toolCount: getBuiltinTools().length + mcpTools.length,
   persisted,
   project: process.cwd(),
 };
@@ -94,7 +117,7 @@ function createAgent(sessionId?: string): PlainAgent {
       model: info.model,
       baseUrl: info.baseUrl,
     },
-    tools: getBuiltinTools(),
+    tools: [...getBuiltinTools(), ...mcpTools],
     storage,
     sessionId,
     systemPrompt: TUI_SYSTEM_PROMPT,
@@ -122,6 +145,9 @@ const flagValue = (name: string): string | undefined => {
 };
 
 async function main(): Promise<void> {
+  // 加载 MCP 工具
+  await loadMcp();
+
   // --sessions：列出会话并退出
   if (argv.includes('--sessions')) {
     const sessions = await storage.listSessions();
@@ -133,6 +159,7 @@ async function main(): Promise<void> {
         console.log(`  ${s.id.slice(0, 8)}  ${s.title || '(未命名)'}  ${new Date(s.updatedAt).toLocaleString()}`);
       }
     }
+    await mcpCleanup?.();
     process.exit(0);
   }
 
@@ -171,6 +198,15 @@ async function main(): Promise<void> {
     );
   };
   startApp(sessionId);
+
+  // 清理 MCP 连接（进程退出时）
+  process.on('exit', () => {
+    void mcpCleanup?.();
+  });
+  process.on('SIGINT', async () => {
+    await mcpCleanup?.();
+    process.exit(0);
+  });
 }
 
 void main();

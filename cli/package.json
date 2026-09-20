@@ -15,12 +15,14 @@
   },
   "dependencies": {
     "@plain-agent/domain": "workspace:*",
+    "figlet": "^1.12.0",
     "ink": "^7.1.1",
     "ink-text-input": "^6.0.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },
   "devDependencies": {
+    "@types/figlet": "^1.7.0",
     "@types/node": "^20.10.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

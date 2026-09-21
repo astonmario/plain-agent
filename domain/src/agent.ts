@@ -23,6 +23,7 @@ import { createHistoryLookupTool, createHistorySearchTool } from './tools/histor
 import { JobRegistry } from './tools/jobs';
 import { DEFAULT_SYSTEM_PROMPT } from './prompt';
 import { discoverSkills, skillsCatalogPrompt } from './skills';
+import { applyProxyConfig } from './proxy';
 import type {
   AgentConfig,
   AgentEvent,
@@ -82,6 +83,11 @@ export class PlainAgent extends EventEmitter {
    */
   constructor(config: AgentConfig) {
     super();
+
+    // 应用全局代理配置（读取环境变量 http_proxy/https_proxy）
+    // 这会让 web_fetch、web_search、MCP SSE、LLM 调用等所有网络请求都走代理
+    applyProxyConfig();
+
     this.config = config;
     this.storage = config.storage || null;
     this.sessionId = config.sessionId || randomUUID();

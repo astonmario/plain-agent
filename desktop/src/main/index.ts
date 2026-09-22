@@ -138,6 +138,27 @@ function registerIpcHandlers(): void {
     await agentService!.updateSettings(settings);
   });
 
+  // MCP 相关
+  ipcMain.handle('mcp:getConfig', () => {
+    return agentService!.getMcpConfig();
+  });
+
+  ipcMain.handle('mcp:saveConfig', async (_e, config) => {
+    await agentService!.saveMcpConfig(config);
+  });
+
+  ipcMain.handle('mcp:reload', async () => {
+    await agentService!.reloadMcp();
+  });
+
+  ipcMain.handle('mcp:getTools', () => {
+    return agentService!.getMcpTools();
+  });
+
+  ipcMain.handle('mcp:getToolCount', () => {
+    return agentService!.getMcpToolCount();
+  });
+
   // 技能管理：只操作用户全局技能目录（~/.plain-agent/skills），不暴露磁盘路径给渲染端
   ipcMain.handle('skills:list', () => {
     return listUserSkills().map(({ name, description }) => ({ name, description }));

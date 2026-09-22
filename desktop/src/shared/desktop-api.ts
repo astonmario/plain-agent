@@ -4,6 +4,7 @@
  */
 
 import type { AgentEvent, ChatMessage, Session } from '@plain-agent/domain/types';
+import type { McpServerConfig } from '@plain-agent/domain';
 
 export interface HistoryUsageInfo {
   tokens: number;
@@ -43,6 +44,12 @@ export interface SkillSaveResult {
   message: string;
 }
 
+/** MCP 工具信息 */
+export interface McpToolInfo {
+  name: string;
+  description: string;
+}
+
 export interface DesktopAPI {
   // 任务
   submit(task: string, taskId?: string): Promise<string>;
@@ -67,6 +74,13 @@ export interface DesktopAPI {
   getConfig(): Promise<AgentConfigInfo>;
   getSettings(): Promise<AppSettings>;
   updateSettings(settings: AppSettings): Promise<void>;
+
+  // MCP 管理
+  getMcpConfig(): Promise<Record<string, McpServerConfig>>;
+  saveMcpConfig(config: Record<string, McpServerConfig>): Promise<void>;
+  reloadMcp(): Promise<void>;
+  getMcpTools(): Promise<McpToolInfo[]>;
+  getMcpToolCount(): Promise<number>;
 
   // 技能管理（只操作用户全局技能目录，不碰项目级）
   listSkills(): Promise<SkillSummary[]>;

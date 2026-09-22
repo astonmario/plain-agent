@@ -28,6 +28,12 @@ const api: DesktopAPI = {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   updateSettings: (settings) => ipcRenderer.invoke('settings:update', settings),
 
+  getMcpConfig: () => ipcRenderer.invoke('mcp:getConfig'),
+  saveMcpConfig: (config) => ipcRenderer.invoke('mcp:saveConfig', config),
+  reloadMcp: () => ipcRenderer.invoke('mcp:reload'),
+  getMcpTools: () => ipcRenderer.invoke('mcp:getTools'),
+  getMcpToolCount: () => ipcRenderer.invoke('mcp:getToolCount'),
+
   listSkills: () => ipcRenderer.invoke('skills:list'),
   readSkill: (name) => ipcRenderer.invoke('skills:read', name),
   saveSkill: (input) => ipcRenderer.invoke('skills:save', input),

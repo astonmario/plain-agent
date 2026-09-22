@@ -15,12 +15,14 @@
   },
   "dependencies": {
     "@plain-agent/domain": "workspace:*",
+    "js-yaml": "^5.4.3",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.10.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

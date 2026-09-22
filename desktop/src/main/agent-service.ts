@@ -4,14 +4,15 @@
  * 支持多会话（每个会话一个 PlainAgent 实例），SQLite 持久化
  */
 
-import { PlainAgent, SQLiteStorage, getBuiltinTools } from '@plain-agent/domain';
-import type { AgentEvent, ChatMessage, LLMConfig, Session } from '@plain-agent/domain';
-import { readFileSync, existsSync, mkdirSync } from 'fs';
+import { PlainAgent, SQLiteStorage, getBuiltinTools, loadMcpTools, loadProjectMcp } from '@plain-agent/domain';
+import type { AgentEvent, ChatMessage, LLMConfig, Session, Tool, McpServerConfig } from '@plain-agent/domain';
+import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { resolve, join } from 'path';
 import { randomUUID } from 'crypto';
 import { app } from 'electron';
 import { SettingsStore } from './settings-store.js';
 import type { AppSettings } from '../shared/desktop-api.js';
+import * as yaml from 'js-yaml';
 
 /**
  * 加载 .env 文件到 process.env
@@ -66,20 +67,75 @@ export class AgentService {
   private agents = new Map<string, PlainAgent>();
   private currentSessionId: string | null = null;
   private onEventListeners = new Set<(event: AgentEvent) => void>();
+  private mcpTools: Tool[] = [];
+  private mcpCleanup: (() => Promise<void>) | null = null;
+  private userDataDir: string;
 
   constructor() {
     // 加载环境变量（作为 fallback 层）
     loadEnv();
 
     // SQLite 持久化到 userData 目录
-    const userDataDir = app.getPath('userData');
-    mkdirSync(userDataDir, { recursive: true });
-    const dbPath = join(userDataDir, 'plain-agent.db');
+    this.userDataDir = app.getPath('userData');
+    mkdirSync(this.userDataDir, { recursive: true });
+    const dbPath = join(this.userDataDir, 'plain-agent.db');
     this.storage = new SQLiteStorage(dbPath);
 
     // 加载用户配置（settings.json > .env > 默认值）
-    this.settingsStore = new SettingsStore(userDataDir);
+    this.settingsStore = new SettingsStore(this.userDataDir);
     this.settings = this.settingsStore.load();
+
+    // 加载 MCP 工具
+    void this.loadMcp();
+  }
+
+  /**
+   * 加载 MCP 工具
+   */
+  private async loadMcp(): Promise<void> {
+    try {
+      const mcpConfigPath = join(this.userDataDir, 'mcp.yaml');
+      let mcpConfig: Record<string, McpServerConfig> = {};
+
+      if (existsSync(mcpConfigPath)) {
+        const content = readFileSync(mcpConfigPath, 'utf-8');
+        mcpConfig = (yaml.load(content) as Record<string, McpServerConfig>) || {};
+      }
+
+      if (Object.keys(mcpConfig).length > 0) {
+        console.log('[MCP] 加载 MCP 服务器...');
+        const mcpManager = await loadMcpTools(mcpConfig);
+        this.mcpTools = mcpManager.tools;
+        this.mcpCleanup = mcpManager.cleanup;
+        console.log(`[MCP] 已加载 ${this.mcpTools.length} 个 MCP 工具`);
+      }
+    } catch (err) {
+      console.warn('[MCP] 加载失败:', (err as Error).message);
+      this.mcpTools = [];
+      this.mcpCleanup = null;
+    }
+  }
+
+  /**
+   * 重新加载 MCP 配置
+   */
+  async reloadMcp(): Promise<void> {
+    // 清理旧连接
+    if (this.mcpCleanup) {
+      await this.mcpCleanup();
+      this.mcpCleanup = null;
+    }
+    this.mcpTools = [];
+
+    // 重新加载
+    await this.loadMcp();
+
+    // 重新创建所有 agent 实例以使用新工具
+    const sessions = Array.from(this.agents.keys());
+    this.agents.clear();
+    for (const sid of sessions) {
+      this.agents.set(sid, this.createAgent(sid));
+    }
   }
 
   /**
@@ -88,7 +144,7 @@ export class AgentService {
   private createAgent(sessionId: string): PlainAgent {
     const agent = new PlainAgent({
       llm: buildLLMConfigFromSettings(this.settings),
-      tools: getBuiltinTools(),
+      tools: [...getBuiltinTools(), ...this.mcpTools],
       storage: this.storage,
       sessionId,
       permissionMode: this.settings.permissionMode,
@@ -297,10 +353,66 @@ export class AgentService {
     }
   }
 
+  // ============ MCP 管理 ============
+
+  /**
+   * 获取 MCP 配置
+   */
+  getMcpConfig(): Record<string, McpServerConfig> {
+    try {
+      const mcpConfigPath = join(this.userDataDir, 'mcp.yaml');
+      if (!existsSync(mcpConfigPath)) {
+        return {};
+      }
+      const content = readFileSync(mcpConfigPath, 'utf-8');
+      return (yaml.load(content) as Record<string, McpServerConfig>) || {};
+    } catch (err) {
+      console.error('[MCP] 读取配置失败:', err);
+      return {};
+    }
+  }
+
+  /**
+   * 保存 MCP 配置
+   */
+  async saveMcpConfig(config: Record<string, McpServerConfig>): Promise<void> {
+    try {
+      const mcpConfigPath = join(this.userDataDir, 'mcp.yaml');
+      const content = yaml.dump(config);
+      writeFileSync(mcpConfigPath, content, 'utf-8');
+      console.log('[MCP] 配置已保存');
+    } catch (err) {
+      console.error('[MCP] 保存配置失败:', err);
+      throw err;
+    }
+  }
+
+  /**
+   * 获取已加载的 MCP 工具列表
+   */
+  getMcpTools(): Array<{ name: string; description: string }> {
+    return this.mcpTools.map(t => ({
+      name: t.name,
+      description: t.description,
+    }));
+  }
+
+  /**
+   * 获取 MCP 工具数量
+   */
+  getMcpToolCount(): number {
+    return this.mcpTools.length;
+  }
+
   /** 销毁服务 */
   destroy(): void {
     this.agents.forEach(agent => agent.destroy());
     this.agents.clear();
     this.onEventListeners.clear();
+
+    // 清理 MCP 连接
+    if (this.mcpCleanup) {
+      void this.mcpCleanup();
+    }
   }
 }

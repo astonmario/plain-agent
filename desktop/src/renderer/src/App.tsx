@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AgentEvent, Session, ChatMessage, InteractionQuestion } from '@plain-agent/domain/types';
 import type { AppSettings, SkillDetail, SkillSummary } from '../../shared/desktop-api';
+import { McpConfigModal } from './McpConfig';
 
 // 与 domain/src/skills.ts 的 SKILL_NAME_RE 保持一致（渲染端不引 domain 运行时，避免打包 node 模块）
 const SKILL_NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -177,6 +178,7 @@ function App() {
   const [currentSessionId, setCurrentSessionId] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [showSkills, setShowSkills] = useState(false);
+  const [showMcpConfig, setShowMcpConfig] = useState(false);
   const [settingsForm, setSettingsForm] = useState<AppSettings | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
@@ -639,6 +641,14 @@ function App() {
             <button className="btn-settings" onClick={() => setShowSkills(true)} title="技能管理">
               <IconSkills />
             </button>
+            <button className="btn-settings" onClick={() => setShowMcpConfig(true)} title="MCP 配置">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="7" height="7"/>
+                <rect x="14" y="3" width="7" height="7"/>
+                <rect x="14" y="14" width="7" height="7"/>
+                <rect x="3" y="14" width="7" height="7"/>
+              </svg>
+            </button>
             <button className="btn-settings" onClick={openSettings} title="设置">
               <IconSettings />
             </button>
@@ -723,6 +733,11 @@ function App() {
       {/* 技能管理弹窗 */}
       {showSkills && (
         <SkillsModal onClose={() => setShowSkills(false)} />
+      )}
+
+      {/* MCP 配置弹窗 */}
+      {showMcpConfig && (
+        <McpConfigModal onClose={() => setShowMcpConfig(false)} />
       )}
 
       {/* ask_question 提问模态（agent 阻塞等答案） */}

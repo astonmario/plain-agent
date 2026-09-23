@@ -1296,3 +1296,428 @@ body {
   padding: 0;
   border-top: none;
 }
+/* MCP 配置模态框样式 */
+.mcp-modal {
+/* MCP 配置模态框样式 - 现代化设计 */
+.mcp-modal {
+  max-width: 1100px;
+  width: 90vw;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.mcp-body {
+  display: flex;
+  gap: 24px;
+  overflow: hidden;
+  flex: 1;
+  padding: 24px;
+}
+
+/* 左侧边栏 */
+.mcp-sidebar {
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  border-right: 1px solid var(--border);
+  padding-right: 24px;
+  overflow-y: auto;
+}
+
+/* 统计卡片 */
+.mcp-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 0;
+}
+
+.stat-item {
+  padding: 16px;
+  background: linear-gradient(135deg, var(--primary) 0%, #667eea 100%);
+  border-radius: 12px;
+  text-align: center;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+  transition: transform 0.2s;
+}
+
+.stat-item:hover {
+  transform: translateY(-2px);
+}
+
+.stat-label {
+  display: block;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.9);
+  margin-bottom: 6px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.stat-value {
+  display: block;
+  font-size: 28px;
+  font-weight: 700;
+  color: white;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* 新建按钮 */
+.mcp-add-btn {
+  width: 100%;
+  padding: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  background: linear-gradient(135deg, var(--primary) 0%, #667eea 100%);
+  border: none;
+  color: white;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.3s;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.mcp-add-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+}
+
+/* 服务器列表 */
+.mcp-server-list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* 服务器列表项 */
+.mcp-server-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  background: var(--bg-secondary);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 2px solid transparent;
+  position: relative;
+  overflow: hidden;
+}
+
+.mcp-server-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--primary);
+  transform: scaleY(0);
+  transition: transform 0.2s;
+}
+
+.mcp-server-item:hover {
+  background: var(--bg-hover);
+  transform: translateX(4px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.mcp-server-item:hover::before {
+  transform: scaleY(1);
+}
+
+.mcp-server-item.active {
+  border-color: var(--primary);
+  background: var(--bg-hover);
+  box-shadow: 0 4px 16px rgba(102, 126, 234, 0.15);
+}
+
+.mcp-server-item.active::before {
+  transform: scaleY(1);
+}
+
+.mcp-server-item.disabled {
+  opacity: 0.5;
+}
+
+.mcp-server-item.disabled::before {
+  background: #999;
+}
+
+/* 服务器信息 */
+.server-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.server-name {
+  font-weight: 600;
+  font-size: 15px;
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.server-type {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+  padding: 2px 8px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  display: inline-block;
+}
+
+/* 服务器操作按钮 */
+.server-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.btn-icon {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: var(--bg-tertiary);
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.btn-icon:hover {
+  background: var(--primary);
+  color: white;
+  transform: scale(1.1);
+}
+
+/* 工具列表区域 */
+.mcp-tools-section {
+  border-top: 1px solid var(--border);
+  padding-top: 20px;
+  margin-top: auto;
+}
+
+.mcp-tools-section h3 {
+  font-size: 13px;
+  margin-bottom: 12px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.mcp-tools-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.mcp-tool-item {
+  padding: 8px 12px;
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: 'Cascadia Code', 'Monaco', 'Courier New', monospace;
+  transition: all 0.2s;
+}
+
+.mcp-tool-item:hover {
+  background: var(--bg-hover);
+  transform: translateX(4px);
+}
+
+.tool-name {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+/* 右侧编辑区 */
+.mcp-editor {
+  flex: 1;
+  overflow-y: auto;
+  padding-left: 24px;
+  padding-right: 8px;
+}
+
+.mcp-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-secondary);
+  text-align: center;
+  font-size: 15px;
+  padding: 40px;
+}
+
+/* 表单样式增强 */
+.form-field {
+  margin-bottom: 20px;
+}
+
+.form-field label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.form-field input,
+.form-field select,
+.form-field textarea {
+  width: 100%;
+  padding: 12px 16px;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  transition: all 0.2s;
+  background: var(--bg-input);
+  color: var(--text);
+}
+
+.form-field input:focus,
+.form-field select:focus,
+.form-field textarea:focus {
+  border-color: var(--primary);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.form-field input:disabled {
+  background: var(--bg-secondary);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.form-hint {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 6px;
+  font-style: italic;
+}
+
+/* 表单操作按钮 */
+.form-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.form-actions .btn-primary {
+  flex: 1;
+  padding: 12px 24px;
+  font-size: 15px;
+  font-weight: 600;
+  background: linear-gradient(135deg, var(--primary) 0%, #667eea 100%);
+  border: none;
+  color: white;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.form-actions .btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+}
+
+.btn-secondary {
+  flex: 1;
+  padding: 12px 24px;
+  font-size: 15px;
+  font-weight: 600;
+  background: var(--bg-secondary);
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-secondary:hover {
+  background: var(--bg-hover);
+  border-color: var(--text-secondary);
+}
+
+/* 消息提示 */
+.form-message {
+  margin-top: 20px;
+  padding: 14px 18px;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+  animation: slideInUp 0.3s ease;
+}
+
+@keyframes slideInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 滚动条美化 */
+.mcp-sidebar::-webkit-scrollbar,
+.mcp-tools-list::-webkit-scrollbar,
+.mcp-editor::-webkit-scrollbar,
+.mcp-server-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.mcp-sidebar::-webkit-scrollbar-track,
+.mcp-tools-list::-webkit-scrollbar-track,
+.mcp-editor::-webkit-scrollbar-track,
+.mcp-server-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.mcp-sidebar::-webkit-scrollbar-thumb,
+.mcp-tools-list::-webkit-scrollbar-thumb,
+.mcp-editor::-webkit-scrollbar-thumb,
+.mcp-server-list::-webkit-scrollbar-thumb {
+  background: var(--text-secondary);
+  border-radius: 3px;
+  opacity: 0.5;
+}
+
+.mcp-sidebar::-webkit-scrollbar-thumb:hover,
+.mcp-tools-list::-webkit-scrollbar-thumb:hover,
+.mcp-editor::-webkit-scrollbar-thumb:hover,
+.mcp-server-list::-webkit-scrollbar-thumb:hover {
+  background: var(--text);
+}

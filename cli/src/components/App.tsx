@@ -18,6 +18,7 @@ import InputBox, { Command } from './InputBox';
 import SessionSelect from './SessionSelect';
 import { InteractionWizard } from './InteractionWizard';
 import { ToolCallDisplay } from './ToolCallDisplay';
+import Logo from './Logo';
 
 export interface TuiInfo {
   model: string;
@@ -447,6 +448,9 @@ export default function App(props: AppProps) {
 
   return (
     <Box flexDirection="column" height="100%">
+      {/* Logo - 仅在消息为空时显示 */}
+      {messages.length === 0 && <Logo />}
+
       <Static items={messages}>
         {(message) => (
           <MessageItem

@@ -26,6 +26,8 @@ export interface AppSettings {
   baseUrl: string;
   maxTokens?: number;
   permissionMode: 'standard' | 'trust' | 'ask';
+  proxy?: string;      // HTTP 代理 URL，如 http://127.0.0.1:7890
+  noProxy?: string;    // 代理白名单，如 localhost,127.0.0.1
 }
 
 /** 技能列表项（不含磁盘路径） */

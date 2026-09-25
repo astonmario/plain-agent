@@ -1270,6 +1270,28 @@ function SettingsModal({
               <option value="ask">询问（危险操作询问用户）</option>
             </select>
           </div>
+
+          <div className="form-field">
+            <label>HTTP 代理（可选）</label>
+            <input
+              type="text"
+              value={settings.proxy || ''}
+              onChange={(e) => update('proxy', e.target.value || undefined)}
+              placeholder="http://127.0.0.1:7890"
+            />
+            <span className="form-hint">用于 web 工具、MCP SSE、LLM API 等网络请求</span>
+          </div>
+
+          <div className="form-field">
+            <label>代理白名单（可选）</label>
+            <input
+              type="text"
+              value={settings.noProxy || ''}
+              onChange={(e) => update('noProxy', e.target.value || undefined)}
+              placeholder="localhost,127.0.0.1"
+            />
+            <span className="form-hint">逗号分隔的域名/IP，这些地址直连不走代理</span>
+          </div>
         </div>
 
         <div className="modal-footer">

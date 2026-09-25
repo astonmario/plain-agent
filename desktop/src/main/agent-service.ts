@@ -4,7 +4,7 @@
  * 支持多会话（每个会话一个 PlainAgent 实例），SQLite 持久化
  */
 
-import { PlainAgent, SQLiteStorage, getBuiltinTools, loadMcpTools, loadProjectMcp } from '@plain-agent/domain';
+import { PlainAgent, SQLiteStorage, getBuiltinTools, loadMcpTools, loadProjectMcp, applyProxyConfig } from '@plain-agent/domain';
 import type { AgentEvent, ChatMessage, LLMConfig, Session, Tool, McpServerConfig } from '@plain-agent/domain';
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { resolve, join } from 'path';
@@ -142,6 +142,9 @@ export class AgentService {
    * 创建指定会话的 agent 实例
    */
   private createAgent(sessionId: string): PlainAgent {
+    // 应用代理配置（每次创建 agent 时应用，支持运行时修改）
+    applyProxyConfig(this.settings.proxy, this.settings.noProxy);
+
     const agent = new PlainAgent({
       llm: buildLLMConfigFromSettings(this.settings),
       tools: [...getBuiltinTools(), ...this.mcpTools],

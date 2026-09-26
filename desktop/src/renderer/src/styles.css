@@ -1336,7 +1336,7 @@ body {
 
 .stat-item {
   padding: 16px;
-  background: linear-gradient(135deg, var(--primary) 0%, #667eea 100%);
+  background: linear-gradient(135deg, #5046e5 0%, #667eea 100%);
   border-radius: 12px;
   text-align: center;
   box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
@@ -1371,7 +1371,7 @@ body {
   padding: 12px;
   font-size: 15px;
   font-weight: 600;
-  background: linear-gradient(135deg, var(--primary) 0%, #667eea 100%);
+  background: linear-gradient(135deg, #5046e5 0%, #667eea 100%);
   border: none;
   color: white;
   border-radius: 10px;
@@ -1417,7 +1417,7 @@ body {
   top: 0;
   bottom: 0;
   width: 4px;
-  background: var(--primary);
+  background: #5046e5;
   transform: scaleY(0);
   transition: transform 0.2s;
 }
@@ -1433,7 +1433,7 @@ body {
 }
 
 .mcp-server-item.active {
-  border-color: var(--primary);
+  border-color: #5046e5;
   background: var(--bg-hover);
   box-shadow: 0 4px 16px rgba(102, 126, 234, 0.15);
 }
@@ -1502,7 +1502,7 @@ body {
 }
 
 .btn-icon:hover {
-  background: var(--primary);
+  background: #5046e5;
   color: white;
   transform: scale(1.1);
 }
@@ -1547,7 +1547,7 @@ body {
 }
 
 .tool-name {
-  color: var(--primary);
+  color: #5046e5;
   font-weight: 600;
 }
 
@@ -1601,7 +1601,7 @@ body {
 .form-field input:focus,
 .form-field select:focus,
 .form-field textarea:focus {
-  border-color: var(--primary);
+  border-color: #5046e5;
   outline: none;
   box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
 }
@@ -1634,7 +1634,7 @@ body {
   padding: 12px 24px;
   font-size: 15px;
   font-weight: 600;
-  background: linear-gradient(135deg, var(--primary) 0%, #667eea 100%);
+  background: linear-gradient(135deg, #5046e5 0%, #667eea 100%);
   border: none;
   color: white;
   border-radius: 8px;

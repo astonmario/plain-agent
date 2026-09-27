@@ -1,9 +1,10 @@
 /**
  * 技能注册表（搬运自 any-code 的 skills 体系，路径/约定适配 plain-agent）
  * 技能 = <dir>/skills/<name>/SKILL.md（frontmatter: name + description）。
- * 发现目录：
+ * 发现目录（按优先级从高到低）：
+ *  - 项目：<cwd>/.plain-agent/skills/（仅本项目，最高优先）
  *  - 全局：~/.plain-agent/skills/（跨项目）
- *  - 项目：<cwd>/.plain-agent/skills/（仅本项目，覆盖同名全局技能）
+ *  - Claude：~/.claude/skills/（Claude Code 目录，兼容已装技能如 xmind/drawio）
  * agent 每次提交任务时重新扫描，写入 ctx.skills 并注入 <available_skills> 目录。
  */
 
@@ -17,6 +18,10 @@ const SKILLS_DIR = 'skills';
 
 export function globalSkillsDir(): string {
   return join(homedir(), PROJECT_DIR, SKILLS_DIR);
+}
+
+export function claudeSkillsDir(): string {
+  return join(homedir(), '.claude', SKILLS_DIR);
 }
 
 export function projectSkillsDir(cwd: string): string {
@@ -34,7 +39,7 @@ function parseSkillMd(raw: string): { name: string; description: string; content
   return { name, description, content: m[2].trim() };
 }
 
-function scanSkillsDir(dir: string, origin: 'global' | 'project', out: Map<string, SkillEntry>): void {
+function scanSkillsDir(dir: string, origin: 'global' | 'project' | 'claude', out: Map<string, SkillEntry>): void {
   if (!existsSync(dir)) return;
   let entries: string[];
   try {
@@ -69,10 +74,14 @@ function scanSkillsDir(dir: string, origin: 'global' | 'project', out: Map<strin
 }
 
 /**
- * 发现全部可用技能。先扫描全局、后扫描项目——项目级同名覆盖全局。
+ * 发现全部可用技能。
+ * 优先级（高→低）: project > global > claude
+ * 项目级可覆盖全局级，全局级可覆盖 claude 级。
  */
 export function discoverSkills(cwd: string): Map<string, SkillEntry> {
   const out = new Map<string, SkillEntry>();
+  // 从低到高扫描，后扫描的覆盖先扫描的
+  scanSkillsDir(claudeSkillsDir(), 'claude', out);
   scanSkillsDir(globalSkillsDir(), 'global', out);
   scanSkillsDir(projectSkillsDir(cwd), 'project', out);
   return out;

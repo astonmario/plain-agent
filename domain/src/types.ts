@@ -63,7 +63,8 @@ export interface SkillEntry {
   content: string;
   /** SKILL.md 所在目录（内置技能可附带，供 agent 读 references/scripts） */
   dir?: string;
-  origin: 'global' | 'project';
+  /** 技能来源：project（项目级）> global（全局）> claude（Claude Code 兼容） */
+  origin: 'global' | 'project' | 'claude';
 }
 
 export interface SerializedError {

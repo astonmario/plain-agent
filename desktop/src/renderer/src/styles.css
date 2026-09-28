@@ -284,6 +284,13 @@ body {
   border-color: var(--border-strong);
 }
 
+.usage-badge.disabled,
+.usage-badge:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 .session-badge {
   font-size: 11px;
   color: var(--text-tertiary);

@@ -541,6 +541,7 @@ function App() {
   };
 
   const handleCompress = async () => {
+    if (isRunning) return; // 正在运行时禁止压缩
     await window.api.compressHistory(false);
     refreshUsage();
   };
@@ -625,9 +626,12 @@ function App() {
           <div className="header-actions">
             {usage && (
               <button
-                className="usage-badge"
+                className={`usage-badge ${isRunning ? 'disabled' : ''}`}
                 onClick={handleCompress}
-                title={`Token: ${usage.tokens}/${usage.maxTokens} (${usage.percentage.toFixed(1)}%)`}
+                disabled={isRunning}
+                title={isRunning
+                  ? '正在处理中，请稍候...'
+                  : `Token: ${usage.tokens}/${usage.maxTokens} (${usage.percentage.toFixed(1)}%) - 点击手动压缩`}
               >
                 <IconDot color={usage.percentage >= 75 ? '#ef4444' : usage.percentage >= 60 ? '#f59e0b' : '#22c55e'} />
                 {usage.tokens}/{usage.maxTokens}

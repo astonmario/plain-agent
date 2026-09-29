@@ -28,10 +28,20 @@ import type {
   AgentConfig,
   AgentEvent,
   ChatMessage,
+  PersistedJob,
   SessionStorage,
   ToolContext,
   PermissionContext
 } from './types';
+
+/**
+ * 后台任务结果回注预算（字符数，防上下文爆炸）：
+ * - 单任务注入上限：超出截断 + 给出 job_output 指针
+ * - 注入总量上限：超出的降级为一行"未展开"指针
+ * 预算只影响注入对话的多少，不影响落盘保存。
+ */
+const JOB_INJECT_MAX_PER_JOB = 2000;
+const JOB_INJECT_MAX_TOTAL = 8000;
 
 export class PlainAgent extends EventEmitter {
   // 任务控制器映射：taskId -> AbortController
@@ -65,6 +75,12 @@ export class PlainAgent extends EventEmitter {
 
   // bash 后台任务注册表
   private jobs = new JobRegistry();
+
+  // 后台任务完成订阅的退订函数
+  private unsubscribeJobDone?: () => void;
+
+  // 待处理的后台任务结果（agent 空闲时累积）
+  private pendingJobResults: Array<{ id: string; output: string; exitCode: number | null }> = [];
 
   /**
    * 构造函数
@@ -116,6 +132,62 @@ export class PlainAgent extends EventEmitter {
       // 添加到工具列表
       this.config.tools = [...this.config.tools, lookupTool, searchTool];
     }
+
+    // 后台任务完成回注（bugfix 2026-09-18）：job 完成 → 空闲则标记待消化，
+    // 忙碌则队列注入。没有它 agent 以为主任务已 Done，后台结果永远停在注册表
+    // （用户看到卡死的 "bash 执行中"）。
+    this.unsubscribeJobDone = this.jobs.onDone((job) => this.onJobDone(job));
+  }
+
+  /**
+   * job 完成回注：先落盘（结果保存不依赖模型是否读取），再进内存队列待 submit 注入
+   */
+  private onJobDone(job: import('./tools/jobs').BashJob): void {
+    // 1. 持久化（可选存储；失败仅告警，不阻塞回注流程）
+    if (this.storage?.saveJob) {
+      const record: PersistedJob = {
+        id: job.id,
+        command: job.command,
+        intent: job.intent,
+        status: job.exitCode === -1 ? 'error' : 'done',
+        exitCode: job.exitCode,
+        output: job.output,
+        truncated: job.truncated,
+        startedAt: job.startedAt,
+        finishedAt: job.finishedAt,
+      };
+      this.storage.saveJob(this.sessionId, record).catch(err => {
+        console.error('Failed to persist job result:', err);
+      });
+    }
+
+    // 2. 进内存队列，submit 时注入
+    this.pendingJobResults.push({ id: job.id, output: this.formatJobResult(job.id, job.command, job.output, job.exitCode), exitCode: job.exitCode });
+  }
+
+  /** 组装回注消息文本（含状态行，输出部分由调用方/预算逻辑截断） */
+  private formatJobResult(id: string, command: string, output: string, exitCode: number | null): string {
+    const status = exitCode === 0 ? '成功' : exitCode === -1 ? '启动失败' : `失败（exit code ${exitCode}）`;
+    return `[后台任务完成] job_id=${id} ${status}\n命令：${command}\n输出：\n${output || '（无输出）'}`;
+  }
+
+  /**
+   * 取走全部未消化的 job 结果。取后即清。
+   */
+  takePendingJobResults(): Array<{ id: string; output: string; exitCode: number | null }> {
+    const results = this.pendingJobResults;
+    this.pendingJobResults = [];
+    return results;
+  }
+
+  /** 批量标记任务已回注（幂等，失败仅告警） */
+  private markJobsConsumed(jobIds: string[]): void {
+    if (!this.storage?.markJobConsumed) return;
+    for (const jobId of jobIds) {
+      this.storage.markJobConsumed(this.sessionId, jobId).catch(err => {
+        console.error('Failed to mark job consumed:', err);
+      });
+    }
   }
 
   /**
@@ -144,6 +216,36 @@ export class PlainAgent extends EventEmitter {
         ? messages
         : [{ role: 'system', content: this.systemPrompt }, ...messages];
       this.compressedMessages = null; // 清空压缩缓存
+
+      // 恢复未回注的后台任务结果（应用重启前完成、尚未注入对话的任务）
+      // 结果已落盘，这里只补进内存队列，submit 时与其他结果一起注入
+      if (this.storage.loadPendingJobs) {
+        try {
+          const pendingJobs = await this.storage.loadPendingJobs(this.sessionId);
+          // 去重：loadHistory 可能被重复调用，避免同一结果二次入队
+          const known = new Set(this.pendingJobResults.map(p => p.id));
+          let recovered = 0;
+          for (const j of pendingJobs) {
+            if (known.has(j.id)) continue;
+            this.pendingJobResults.push({
+              id: j.id,
+              output: this.formatJobResult(j.id, j.command, j.output, j.exitCode),
+              exitCode: j.exitCode,
+            });
+            recovered++;
+          }
+          if (recovered > 0) {
+            this.emitEvent({
+              type: 'thinking',
+              content: `检测到 ${pendingJobs.length} 个重启前完成的后台任务结果，将在下次任务时回注`,
+              timestamp: Date.now()
+            });
+          }
+        } catch (err) {
+          console.error('Failed to load pending jobs:', err);
+        }
+      }
+
       return messages.length;
     } catch (error) {
       console.error('Failed to load history:', error);
@@ -185,6 +287,34 @@ export class PlainAgent extends EventEmitter {
     // 创建该任务的中断控制器
     const abortController = new AbortController();
     this.taskControllers.set(id, abortController);
+
+    // 取出待处理的后台任务结果并前置注入（三层预算防上下文爆炸）
+    const pending = this.takePendingJobResults();
+    if (pending.length > 0) {
+      const parts: string[] = [];
+      let total = 0;
+      for (let i = 0; i < pending.length; i++) {
+        const p = pending[i];
+        // 第一层：单任务截断
+        let body = p.output;
+        if (body.length > JOB_INJECT_MAX_PER_JOB) {
+          body = body.slice(0, JOB_INJECT_MAX_PER_JOB) +
+            `\n…（输出过长已截断，用 job_output 工具查看 job_id=${p.id} 的完整输出）`;
+        }
+        // 第二层：注入总量限制，超出的降级为一行指针
+        if (total + body.length > JOB_INJECT_MAX_TOTAL && parts.length > 0) {
+          parts.push(`[后台任务结果还有 ${pending.length - i} 条未展开（超出注入预算），用 job_output 工具按需查看]`);
+          break;
+        }
+        total += body.length;
+        parts.push(body);
+      }
+      task = `${parts.join('\n\n')}\n\n用户新任务：${task}`;
+
+      // 第三层：标记已回注（幂等）。注意：是"进入 prompt"即视为已投递，
+      // 未展开的也一并标记——prompt 里已给出 job_output 指针，模型可自行拉取。
+      this.markJobsConsumed(pending.map(p => p.id));
+    }
 
     // 构建工具上下文
     // 技能每任务重新扫描：新建/修改的技能下一条任务即可用
@@ -391,6 +521,7 @@ export class PlainAgent extends EventEmitter {
    */
   destroy(): void {
     this.stop(); // 停止所有任务
+    this.unsubscribeJobDone?.(); // 退订 job 完成事件，防止已销毁实例被回调
     this.jobs.killAll(); // 终止所有后台任务
     this.removeAllListeners();
   }

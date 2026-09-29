@@ -28,6 +28,13 @@ const OUTPUT_CAP = 200_000;
 
 export class JobRegistry {
   private jobs = new Map<string, BashJob & { child: ChildProcess }>();
+  private listeners = new Set<(job: BashJob) => void>();
+
+  /** 订阅任务完成事件；返回退订函数 */
+  onDone(listener: (job: BashJob) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
 
   /** 后台启动命令；返回 job id。 */
   launch(binary: string, args: string[], cwd: string, intent?: string): string {
@@ -61,6 +68,16 @@ export class JobRegistry {
       job.done = true;
       job.exitCode = code;
       job.finishedAt = Date.now();
+
+      // 通知订阅者（异常隔离）
+      for (const listener of this.listeners) {
+        try {
+          listener(job);
+        } catch (err) {
+          console.error('[JobRegistry] onDone listener error:', err);
+        }
+      }
+
       const done = [...this.jobs.values()].filter((x) => x.done);
       if (done.length > DONE_JOB_LIMIT) {
         done.sort((a, b) => (a.finishedAt ?? 0) - (b.finishedAt ?? 0));
@@ -73,6 +90,15 @@ export class JobRegistry {
       job.done = true;
       job.exitCode = -1;
       job.output += '\n[job error: failed to spawn]';
+
+      // 通知订阅者
+      for (const listener of this.listeners) {
+        try {
+          listener(job);
+        } catch (err) {
+          console.error('[JobRegistry] onDone listener error:', err);
+        }
+      }
     });
     this.jobs.set(id, job);
     return id;

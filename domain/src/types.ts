@@ -128,6 +128,18 @@ export interface SessionStorage {
   listSessions(): Promise<Session[]>;
   renameSession(sessionId: string, newTitle: string): Promise<void>;
   deleteSession(sessionId: string): Promise<void>;
+
+  /**
+   * 以下三个方法为可选实现（后台任务结果持久化）。
+   * 未实现的存储后端（如 CLI 的内存存储）退化为原有内存行为，
+   * 仅影响"重启后结果不丢"这一特性，不影响正常运行。
+   */
+  /** 保存/更新任务记录（UPSERT）；实现方可顺带清理过期任务 */
+  saveJob?(sessionId: string, job: PersistedJob): Promise<void>;
+  /** 加载已完成但未回注（consumedAt 为空）的任务，用于重启恢复 */
+  loadPendingJobs?(sessionId: string): Promise<PersistedJob[]>;
+  /** 标记任务已回注；必须幂等（重复调用无副作用） */
+  markJobConsumed?(sessionId: string, jobId: string): Promise<void>;
 }
 
 export interface Session {
@@ -136,6 +148,28 @@ export interface Session {
   createdAt: number;
   updatedAt: number;
   status: 'active' | 'archived';
+}
+
+// ============ 后台任务持久化 ============
+
+/**
+ * 持久化的后台任务记录（回注防丢失）
+ * 核心原则：任务结果先可靠落盘，是否被模型读取不影响保存。
+ * consumedAt 为 null 表示已完成但尚未回注给模型（重启后需补注）。
+ */
+export interface PersistedJob {
+  id: string;
+  command: string;
+  intent?: string;
+  status: 'done' | 'error';
+  exitCode: number | null;
+  /** 截断后的输出（入库时约 50KB 上限） */
+  output: string;
+  truncated: boolean;
+  startedAt: number;
+  finishedAt?: number;
+  /** 回注完成时间；null = 待回注 */
+  consumedAt?: number | null;
 }
 
 // ============ Agent 配置 ============

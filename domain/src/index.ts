@@ -59,6 +59,7 @@ export type {
   ToolMeta,
   SessionStorage,
   Session,
+  PersistedJob,
   PermissionMode,
   HistoryManagementConfig,
   InteractionQuestion,

@@ -5,7 +5,12 @@
  */
 
 import { createRequire } from 'module';
-import type { SessionStorage, Session, ChatMessage, AgentEvent } from '../types';
+import type { SessionStorage, Session, ChatMessage, AgentEvent, PersistedJob } from '../types';
+
+/** 入库输出上限（截断保留尾部，更早的内容由 job_output 工具的内存注册表兜底） */
+const JOB_OUTPUT_CAP = 50 * 1024;
+/** 已消费任务的保留期，saveJob 时顺带清理过期记录 */
+const JOB_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 export class SQLiteStorage implements SessionStorage {
   // node:sqlite 的 DatabaseSync 实例
@@ -53,11 +58,29 @@ export class SQLiteStorage implements SessionStorage {
         FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
       );
 
+      -- 后台任务表（结果先落盘，回注状态用 consumed_at 标记，幂等投递）
+      CREATE TABLE IF NOT EXISTS jobs (
+        id          TEXT PRIMARY KEY,
+        session_id  TEXT NOT NULL,
+        command     TEXT NOT NULL,
+        intent      TEXT,
+        status      TEXT CHECK(status IN ('done', 'error')) NOT NULL,
+        exit_code   INTEGER,
+        output      TEXT,
+        truncated   INTEGER DEFAULT 0,
+        started_at  INTEGER NOT NULL,
+        finished_at INTEGER,
+        consumed_at INTEGER,
+        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+      );
+
       -- 索引
       CREATE INDEX IF NOT EXISTS idx_messages_session
         ON messages(session_id, created_at);
       CREATE INDEX IF NOT EXISTS idx_events_session
         ON events(session_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_jobs_pending
+        ON jobs(session_id, consumed_at);
     `);
   }
 
@@ -162,6 +185,69 @@ export class SQLiteStorage implements SessionStorage {
     this.db.prepare(`
       DELETE FROM sessions WHERE id = ?
     `).run(sessionId);
+  }
+
+  async saveJob(sessionId: string, job: PersistedJob): Promise<void> {
+    // 确保会话存在
+    await this.createSession(sessionId, 'Untitled');
+
+    // 截断输出，保留尾部（尾部通常是错误信息，对诊断最有价值）
+    let output = job.output;
+    let truncated = job.truncated;
+    if (output.length > JOB_OUTPUT_CAP) {
+      output = '…[earlier output dropped]\n' + output.slice(-JOB_OUTPUT_CAP);
+      truncated = true;
+    }
+
+    this.db.prepare(`
+      INSERT INTO jobs (id, session_id, command, intent, status, exit_code, output, truncated, started_at, finished_at, consumed_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        status = excluded.status,
+        exit_code = excluded.exit_code,
+        output = excluded.output,
+        truncated = excluded.truncated,
+        finished_at = excluded.finished_at
+    `).run(
+      job.id, sessionId, job.command, job.intent || null, job.status,
+      job.exitCode, output, truncated ? 1 : 0,
+      job.startedAt, job.finishedAt ?? null, job.consumedAt ?? null
+    );
+
+    // 顺带清理过期的已消费任务（7 天前），避免表无限增长
+    this.db.prepare(`
+      DELETE FROM jobs WHERE consumed_at IS NOT NULL AND consumed_at < ?
+    `).run(Date.now() - JOB_RETENTION_MS);
+  }
+
+  async loadPendingJobs(sessionId: string): Promise<PersistedJob[]> {
+    const rows = this.db.prepare(`
+      SELECT id, command, intent, status, exit_code, output, truncated, started_at, finished_at
+      FROM jobs
+      WHERE session_id = ? AND consumed_at IS NULL
+      ORDER BY finished_at ASC
+    `).all(sessionId) as any[];
+
+    return rows.map(row => ({
+      id: row.id,
+      command: row.command,
+      intent: row.intent || undefined,
+      status: row.status,
+      exitCode: row.exit_code,
+      output: row.output || '',
+      truncated: !!row.truncated,
+      startedAt: row.started_at,
+      finishedAt: row.finished_at || undefined,
+      consumedAt: null,
+    }));
+  }
+
+  async markJobConsumed(sessionId: string, jobId: string): Promise<void> {
+    // WHERE consumed_at IS NULL 保证幂等：重复调用不会覆盖首次回注时间
+    this.db.prepare(`
+      UPDATE jobs SET consumed_at = ?
+      WHERE id = ? AND session_id = ? AND consumed_at IS NULL
+    `).run(Date.now(), jobId, sessionId);
   }
 
   close(): void {

@@ -2,12 +2,13 @@
  * 内存存储适配器（用于测试和 CLI）
  */
 
-import type { SessionStorage, Session, ChatMessage, AgentEvent } from '../types';
+import type { SessionStorage, Session, ChatMessage, AgentEvent, PersistedJob } from '../types';
 
 export class MemoryStorage implements SessionStorage {
   private sessions = new Map<string, Session>();
   private messages = new Map<string, ChatMessage[]>();
   private events = new Map<string, AgentEvent[]>();
+  private jobs = new Map<string, Map<string, PersistedJob>>();
 
   async createSession(sessionId: string, title: string): Promise<void> {
     if (!this.sessions.has(sessionId)) {
@@ -69,11 +70,41 @@ export class MemoryStorage implements SessionStorage {
     this.sessions.delete(sessionId);
     this.messages.delete(sessionId);
     this.events.delete(sessionId);
+    this.jobs.delete(sessionId);
+  }
+
+  async saveJob(sessionId: string, job: PersistedJob): Promise<void> {
+    await this.createSession(sessionId, 'Untitled');
+    let sessionJobs = this.jobs.get(sessionId);
+    if (!sessionJobs) {
+      sessionJobs = new Map();
+      this.jobs.set(sessionId, sessionJobs);
+    }
+    // 保留已回注状态：重复保存同一任务不重置 consumedAt
+    const existing = sessionJobs.get(job.id);
+    sessionJobs.set(job.id, { ...job, consumedAt: job.consumedAt ?? existing?.consumedAt ?? null });
+  }
+
+  async loadPendingJobs(sessionId: string): Promise<PersistedJob[]> {
+    const sessionJobs = this.jobs.get(sessionId);
+    if (!sessionJobs) return [];
+    return [...sessionJobs.values()]
+      .filter(j => j.consumedAt == null)
+      .sort((a, b) => (a.finishedAt ?? 0) - (b.finishedAt ?? 0));
+  }
+
+  async markJobConsumed(sessionId: string, jobId: string): Promise<void> {
+    const job = this.jobs.get(sessionId)?.get(jobId);
+    // 幂等：已回注的不覆盖首次时间
+    if (job && job.consumedAt == null) {
+      job.consumedAt = Date.now();
+    }
   }
 
   clear(): void {
     this.sessions.clear();
     this.messages.clear();
     this.events.clear();
+    this.jobs.clear();
   }
 }

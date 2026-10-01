@@ -23,7 +23,8 @@
     "test:anchor": "tsx test/test-anchor.ts",
     "test:compression": "tsx test/test-smart-compression.ts",
     "test:mcp": "tsx test/test-mcp.ts",
-    "test:jobs": "tsx test/test-job-persistence.ts"
+    "test:jobs": "tsx test/test-job-persistence.ts",
+    "test:logfile": "tsx test/test-job-logfile.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",

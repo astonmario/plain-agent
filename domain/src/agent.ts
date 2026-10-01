@@ -505,6 +505,23 @@ export class PlainAgent extends EventEmitter {
   }
 
   /**
+   * 设置应用退出时是否终止后台任务（默认 true）
+   *
+   * @param enable false = detached 模式，退出时后台任务继续运行
+   *
+   * 使用场景：
+   * - CLI 退出后让测试/构建继续跑
+   * - 长时间任务不受应用重启影响
+   *
+   * 注意：
+   * - detached 任务的日志仍会写入文件，重启后可用 job_output 查看
+   * - 任务状态已持久化到 SQLite，重启后可看到"已完成"
+   */
+  setKillJobsOnExit(enable: boolean): void {
+    this.jobs.setKillOnExit(enable);
+  }
+
+  /**
    * 销毁 Agent（清理资源）
    *
    * 执行步骤：

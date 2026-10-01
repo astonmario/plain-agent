@@ -4,6 +4,9 @@
  * job_kill：终止后台任务
  */
 
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { readFileSync, existsSync } from 'node:fs';
 import type { Tool, ToolContext } from '../types';
 import type { JobRegistry } from './jobs';
 
@@ -35,13 +38,29 @@ export const jobOutputTool: Tool = {
     if (!jobs) return 'Error: 后台任务不可用（当前环境未启用任务注册表）';
 
     if (args.id) {
-      const job = jobs.get(args.id.trim());
-      if (!job) {
-        const all = jobs.list().map((j) => j.id).join(', ');
-        return `Error: job ${args.id} 不存在。${all ? `现有任务：${all}` : '当前无后台任务。'}`;
+      const jobId = args.id.trim();
+      const job = jobs.get(jobId);
+
+      // 内存中有任务记录
+      if (job) {
+        const status = job.done ? `已完成（exit code ${job.exitCode}）` : '运行中';
+        return `[${job.id}] ${status}\n命令：${job.command}\n输出：\n${job.output || '（暂无输出）'}`;
       }
-      const status = job.done ? `已完成（exit code ${job.exitCode}）` : '运行中';
-      return `[${job.id}] ${status}\n命令：${job.command}\n输出：\n${job.output || '（暂无输出）'}`;
+
+      // 内存中没有（可能已过期或应用重启），尝试从日志文件读取
+      try {
+        const logPath = join(homedir(), '.plain-agent', 'sessions', ctx.sessionId, 'jobs', `${jobId}.log`);
+        if (existsSync(logPath)) {
+          const content = readFileSync(logPath, 'utf-8');
+          return `[${jobId}] 已完成（从日志文件恢复）\n输出：\n${content || '（无输出）'}`;
+        }
+      } catch (err) {
+        // 文件读取失败，继续走错误提示
+      }
+
+      // 既无内存记录又无日志文件
+      const all = jobs.list().map((j) => j.id).join(', ');
+      return `Error: job ${jobId} 不存在。${all ? `现有任务：${all}` : '当前无后台任务。'}`;
     }
 
     const all = jobs.list();

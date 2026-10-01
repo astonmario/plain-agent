@@ -143,7 +143,7 @@ export const bashTool: Tool = {
       if (!jobs) return 'Error: 后台任务不可用';
       try {
         const { binary, cwd } = resolveShell(process.cwd(), (ctx as any).gitBashPath);
-        const id = jobs.launch(binary, ['-c', command], cwd, intent);
+        const id = jobs.launch(binary, ['-c', command], cwd, intent, ctx.sessionId);
         return `后台任务已启动：job_id=${id}\n用 job_output 工具查看输出（参数 id="${id}"），完成后用 job_kill 终止（如需）。`;
       } catch (err) {
         return `Error: ${(err as Error).message}`;

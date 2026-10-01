@@ -5,6 +5,9 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { mkdirSync, createWriteStream, type WriteStream } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { killTree, detachedIfPosix } from './process-kill';
 import { createStreamDecoder } from './text-decode';
 
@@ -27,8 +30,14 @@ export interface BashJob {
 const OUTPUT_CAP = 200_000;
 
 export class JobRegistry {
-  private jobs = new Map<string, BashJob & { child: ChildProcess }>();
+  private jobs = new Map<string, BashJob & { child: ChildProcess; logStream?: WriteStream }>();
   private listeners = new Set<(job: BashJob) => void>();
+  private killOnExit = true;
+
+  /** 设置应用退出时是否终止后台任务（默认 true）。false = detached 任务可继续运行 */
+  setKillOnExit(enable: boolean): void {
+    this.killOnExit = enable;
+  }
 
   /** 订阅任务完成事件；返回退订函数 */
   onDone(listener: (job: BashJob) => void): () => void {
@@ -36,11 +45,27 @@ export class JobRegistry {
     return () => this.listeners.delete(listener);
   }
 
-  /** 后台启动命令；返回 job id。 */
-  launch(binary: string, args: string[], cwd: string, intent?: string): string {
+  /** 后台启动命令；返回 job id。
+   * @param sessionId 会话 ID，用于构建日志路径（可选，不传则不写文件）
+   */
+  launch(binary: string, args: string[], cwd: string, intent?: string, sessionId?: string): string {
     const id = randomBytes(4).toString('hex');
     const child = spawn(binary, args, { cwd, windowsHide: true, ...detachedIfPosix });
-    const job: BashJob & { child: ChildProcess } = {
+
+    // 可选：创建日志文件流（~/.plain-agent/sessions/<sessionId>/jobs/<id>.log）
+    let logStream: WriteStream | undefined;
+    if (sessionId) {
+      try {
+        const logDir = join(homedir(), '.plain-agent', 'sessions', sessionId, 'jobs');
+        mkdirSync(logDir, { recursive: true });
+        const logPath = join(logDir, `${id}.log`);
+        logStream = createWriteStream(logPath, { flags: 'w' });
+      } catch (err) {
+        console.error(`[JobRegistry] 创建日志文件失败:`, err);
+      }
+    }
+
+    const job: BashJob & { child: ChildProcess; logStream?: WriteStream } = {
       id,
       command: args[args.length - 1] ?? '',
       intent,
@@ -51,15 +76,21 @@ export class JobRegistry {
       startedAt: Date.now(),
       pid: child.pid,
       child,
+      logStream,
     };
 
     const decOut = createStreamDecoder();
     const decErr = createStreamDecoder();
     const onChunk = (c: Buffer, src: 'out' | 'err') => {
-      job.output += src === 'out' ? decOut.decode(c) : decErr.decode(c);
+      const text = src === 'out' ? decOut.decode(c) : decErr.decode(c);
+      job.output += text;
       if (job.output.length > OUTPUT_CAP) {
         job.output = '…[earlier output dropped]\n' + job.output.slice(-OUTPUT_CAP);
         job.truncated = true;
+      }
+      // 双写到日志文件（完整输出，无截断）
+      if (job.logStream && !job.logStream.destroyed) {
+        job.logStream.write(text);
       }
     };
     child.stdout?.on('data', (c: Buffer) => onChunk(c, 'out'));
@@ -68,6 +99,9 @@ export class JobRegistry {
       job.done = true;
       job.exitCode = code;
       job.finishedAt = Date.now();
+
+      // 关闭日志流
+      job.logStream?.end();
 
       // 通知订阅者（异常隔离）
       for (const listener of this.listeners) {
@@ -90,6 +124,8 @@ export class JobRegistry {
       job.done = true;
       job.exitCode = -1;
       job.output += '\n[job error: failed to spawn]';
+      job.logStream?.write('\n[job error: failed to spawn]');
+      job.logStream?.end();
 
       // 通知订阅者
       for (const listener of this.listeners) {
@@ -127,6 +163,10 @@ export class JobRegistry {
   }
 
   killAll(): void {
+    if (!this.killOnExit) {
+      console.log('[JobRegistry] killOnExit=false, 跳过终止后台任务（detached 模式）');
+      return;
+    }
     for (const j of this.jobs.values()) {
       if (!j.done) killTree(j.child);
     }

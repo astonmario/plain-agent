@@ -1,5 +1,6 @@
 packages:
   - "domain"
+  - "web"
   - "cli"
   - "server"
   - "desktop"

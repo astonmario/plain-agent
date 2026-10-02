@@ -1,10 +1,12 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import App from './App';
+import { App, DesktopClient } from '@plain-agent/web';
 import './styles.css';
+
+const client = new DesktopClient();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    <App client={client} />
   </React.StrictMode>
 );

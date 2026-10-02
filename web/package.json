@@ -1,0 +1,42 @@
+{
+  "name": "@plain-agent/web",
+  "version": "0.1.0",
+  "description": "plain-agent 共享 UI 组件（桌面端和 Web 端公用）",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.tsx",
+  "types": "./src/index.tsx",
+  "exports": {
+    ".": {
+      "types": "./src/index.tsx",
+      "import": "./src/index.tsx"
+    },
+    "./App": {
+      "types": "./src/App.tsx",
+      "import": "./src/App.tsx"
+    },
+    "./McpConfig": {
+      "types": "./src/McpConfig.tsx",
+      "import": "./src/McpConfig.tsx"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@plain-agent/domain": "workspace:*",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "typescript": "^5.3.3"
+  },
+  "peerDependencies": {
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  }
+}

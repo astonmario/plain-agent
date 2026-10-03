@@ -17,6 +17,7 @@ import type { SessionStorage } from '@plain-agent/domain';
 import { hasPendingInteraction } from '@plain-agent/domain';
 import { AgentManager, TERMINAL_EVENTS } from './manager';
 import type { StreamFrame } from './manager';
+import { SettingsStore } from './settings';
 
 export interface AppInfo {
   model: string;
@@ -50,6 +51,7 @@ function replayable(frame: StreamFrame): boolean {
 export function buildApp(deps: AppDeps): Hono {
   const { manager, storage, info } = deps;
   const app = new Hono();
+  const settingsStore = new SettingsStore();
 
   app.use('/*', cors());
 
@@ -219,6 +221,34 @@ export function buildApp(deps: AppDeps): Hono {
   });
 
   app.get('/api/running', (c) => c.json({ running: manager.runningSessions() }));
+
+  // ---- 设置管理 ----
+
+  app.get('/api/settings', (c) => {
+    const settings = settingsStore.load();
+    return c.json(settings);
+  });
+
+  app.patch('/api/settings', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const currentSettings = settingsStore.load();
+
+    // 合并更新
+    const updatedSettings = {
+      ...currentSettings,
+      ...body,
+    };
+
+    // 验证必填字段
+    if (typeof updatedSettings.apiKey !== 'string' ||
+        typeof updatedSettings.model !== 'string' ||
+        typeof updatedSettings.baseUrl !== 'string') {
+      return c.json({ error: '缺少必填字段' }, 400);
+    }
+
+    settingsStore.save(updatedSettings);
+    return c.json({ message: '设置已保存' });
+  });
 
   app.notFound((c) => c.json({ error: 'Not Found' }, 404));
   app.onError((err, c) => {

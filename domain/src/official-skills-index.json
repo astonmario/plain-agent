@@ -1,0 +1,66 @@
+{
+  "version": "1.0.0",
+  "description": "Plain Agent 官方精选技能索引",
+  "skills": [
+    {
+      "id": "anthropics/skill-browser",
+      "name": "browser-skill",
+      "description": "使用浏览器工具浏览网页、搜索信息和交互",
+      "author": "Anthropic",
+      "source": "official",
+      "sourceUrl": "https://github.com/anthropics/skill-browser",
+      "topics": ["browser", "web", "scraping"],
+      "installable": true
+    },
+    {
+      "id": "anthropics/skill-mcp-builder",
+      "name": "mcp-builder",
+      "description": "构建和测试 Model Context Protocol (MCP) 服务器",
+      "author": "Anthropic",
+      "source": "official",
+      "sourceUrl": "https://github.com/anthropics/skill-mcp-builder",
+      "topics": ["mcp", "builder", "protocol"],
+      "installable": true
+    },
+    {
+      "id": "anthropics/skill-creator",
+      "name": "skill-creator",
+      "description": "创建新的技能包模板",
+      "author": "Anthropic",
+      "source": "official",
+      "sourceUrl": "https://github.com/anthropics/skill-creator",
+      "topics": ["skill", "creator", "template"],
+      "installable": true
+    },
+    {
+      "id": "anthropics/algorithmic-art",
+      "name": "algorithmic-art",
+      "description": "生成算法艺术和可视化",
+      "author": "Anthropic",
+      "source": "official",
+      "sourceUrl": "https://github.com/anthropics/algorithmic-art",
+      "topics": ["art", "visualization", "generative"],
+      "installable": true
+    },
+    {
+      "id": "anthropics/canvas-design",
+      "name": "canvas-design",
+      "description": "使用 Canvas API 设计图形和界面",
+      "author": "Anthropic",
+      "source": "official",
+      "sourceUrl": "https://github.com/anthropics/canvas-design",
+      "topics": ["canvas", "design", "graphics"],
+      "installable": true
+    },
+    {
+      "id": "anthropics/frontend-design",
+      "name": "frontend-design",
+      "description": "前端开发和 UI 设计",
+      "author": "Anthropic",
+      "source": "official",
+      "sourceUrl": "https://github.com/anthropics/frontend-design",
+      "topics": ["frontend", "ui", "design"],
+      "installable": true
+    }
+  ]
+}

@@ -42,6 +42,13 @@ export {
   updateUserSkill,
   deleteUserSkill,
 } from './skills';
+export {
+  GitHubSkillDiscovery,
+  LocalSkillIndex,
+  CompositeSkillDiscovery,
+  createSkillDiscovery,
+  installRemoteSkill,
+} from './skill-discovery';
 export { HistoryManager, estimateTokens } from './history-manager';
 export { AnchorManager } from './anchor';
 export { CompressionTrigger } from './compression-trigger';
@@ -70,6 +77,15 @@ export type { HistoryConfig } from './history-manager';
 export type { ConversationAnchor } from './anchor';
 export type { SessionHealth } from './compression-trigger';
 export type { SkillCrudResult } from './skills';
+export type {
+  RemoteSkill,
+  RemoteSkillDetail,
+  SkillSearchResult,
+  SearchOptions,
+  SkillDiscoveryClient,
+  SkillInstallOptions,
+  SkillInstallResult,
+} from './skill-discovery';
 export type {
   McpServerConfig,
   StdioServerConfig,

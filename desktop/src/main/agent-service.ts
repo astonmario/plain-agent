@@ -6,12 +6,14 @@
 
 import { PlainAgent, SQLiteStorage, getBuiltinTools, loadMcpTools, loadProjectMcp, applyProxyConfig } from '@plain-agent/domain';
 import type { AgentEvent, ChatMessage, LLMConfig, Session, Tool, McpServerConfig } from '@plain-agent/domain';
+import { createSkillDiscovery, installRemoteSkill } from '@plain-agent/domain';
+import type { RemoteSkill, RemoteSkillDetail, SkillInstallOptions } from '@plain-agent/domain';
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { resolve, join } from 'path';
 import { randomUUID } from 'crypto';
 import { app } from 'electron';
 import { SettingsStore } from './settings-store.js';
-import type { AppSettings } from '../shared/desktop-api.js';
+import type { AppSettings, RemoteSkillSummary, RemoteSkillDetail as DesktopRemoteSkillDetail } from '../shared/desktop-api.js';
 import * as yaml from 'js-yaml';
 
 /**
@@ -405,6 +407,66 @@ export class AgentService {
    */
   getMcpToolCount(): number {
     return this.mcpTools.length;
+  }
+
+  // ============ 技能发现 ============
+
+  /**
+   * 搜索远程技能
+   */
+  async searchRemoteSkills(query: string): Promise<RemoteSkillSummary[]> {
+    const client = createSkillDiscovery(this.settings.githubToken);
+    const result = await client.search(query, { limit: 20 });
+    return result.skills.map(skill => ({
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      author: skill.author,
+      source: skill.source,
+      sourceUrl: skill.sourceUrl,
+      stars: skill.stars,
+      topics: skill.topics,
+      installable: skill.installable,
+    }));
+  }
+
+  /**
+   * 获取远程技能详情
+   */
+  async getRemoteSkillDetail(id: string): Promise<DesktopRemoteSkillDetail> {
+    const client = createSkillDiscovery(this.settings.githubToken);
+    const detail = await client.getDetail(id);
+    return {
+      id: detail.id,
+      name: detail.name,
+      description: detail.description,
+      author: detail.author,
+      source: detail.source,
+      sourceUrl: detail.sourceUrl,
+      stars: detail.stars,
+      topics: detail.topics,
+      installable: detail.installable,
+      readme: detail.readme,
+    };
+  }
+
+  /**
+   * 安装远程技能
+   */
+  async installRemoteSkill(id: string, target: 'global' | 'project'): Promise<{ ok: boolean; message: string }> {
+    const client = createSkillDiscovery(this.settings.githubToken);
+    const detail = await client.getDetail(id);
+
+    const options: SkillInstallOptions = {
+      target,
+      projectDir: target === 'project' ? process.cwd() : undefined,
+    };
+
+    const result = await installRemoteSkill(detail, options);
+    return {
+      ok: result.ok,
+      message: result.message,
+    };
   }
 
   /** 销毁服务 */

@@ -145,6 +145,13 @@ const flagValue = (name: string): string | undefined => {
 };
 
 async function main(): Promise<void> {
+  // 子命令：skill
+  if (argv[0] === 'skill') {
+    const { handleSkillCommand } = await import('./commands/skill');
+    await handleSkillCommand(argv.slice(1));
+    return;
+  }
+
   // 加载 MCP 工具
   await loadMcp();
 

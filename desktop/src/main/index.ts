@@ -181,6 +181,19 @@ function registerIpcHandlers(): void {
     return deleteUserSkill(name);
   });
 
+  // 技能发现
+  ipcMain.handle('skills:searchRemote', async (_e, query: string) => {
+    return agentService!.searchRemoteSkills(query);
+  });
+
+  ipcMain.handle('skills:getRemoteDetail', async (_e, id: string) => {
+    return agentService!.getRemoteSkillDetail(id);
+  });
+
+  ipcMain.handle('skills:installRemote', async (_e, id: string, target: 'global' | 'project') => {
+    return agentService!.installRemoteSkill(id, target);
+  });
+
   // 事件转发：将 agent 事件推送到渲染进程
   agentService.onEvent((event) => {
     if (mainWindow && !mainWindow.isDestroyed()) {

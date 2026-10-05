@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import type { AgentEvent, Session, ChatMessage, InteractionQuestion } from '@plain-agent/domain/types';
 import type { AppSettings, SkillDetail, SkillSummary } from '../../shared/desktop-api';
 import { McpConfigModal } from './McpConfig';
+import { SkillDiscovery } from './SkillDiscovery';
 
 // 与 domain/src/skills.ts 的 SKILL_NAME_RE 保持一致（渲染端不引 domain 运行时，避免打包 node 模块）
 const SKILL_NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -178,6 +179,7 @@ function App() {
   const [currentSessionId, setCurrentSessionId] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [showSkills, setShowSkills] = useState(false);
+  const [showSkillDiscovery, setShowSkillDiscovery] = useState(false);
   const [showMcpConfig, setShowMcpConfig] = useState(false);
   const [settingsForm, setSettingsForm] = useState<AppSettings | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
@@ -645,6 +647,12 @@ function App() {
             <button className="btn-settings" onClick={() => setShowSkills(true)} title="技能管理">
               <IconSkills />
             </button>
+            <button className="btn-settings" onClick={() => setShowSkillDiscovery(true)} title="技能发现">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="11" cy="11" r="8"/>
+                <path d="m21 21-4.35-4.35"/>
+              </svg>
+            </button>
             <button className="btn-settings" onClick={() => setShowMcpConfig(true)} title="MCP 配置">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <rect x="3" y="3" width="7" height="7"/>
@@ -737,6 +745,18 @@ function App() {
       {/* 技能管理弹窗 */}
       {showSkills && (
         <SkillsModal onClose={() => setShowSkills(false)} />
+      )}
+
+      {/* 技能发现弹窗 */}
+      {showSkillDiscovery && (
+        <div className="modal-overlay" onClick={() => setShowSkillDiscovery(false)}>
+          <div className="modal skill-discovery-modal" onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close" onClick={() => setShowSkillDiscovery(false)}>
+              <IconClose />
+            </button>
+            <SkillDiscovery />
+          </div>
+        </div>
       )}
 
       {/* MCP 配置弹窗 */}

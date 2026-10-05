@@ -39,6 +39,10 @@ const api: DesktopAPI = {
   saveSkill: (input) => ipcRenderer.invoke('skills:save', input),
   deleteSkill: (name) => ipcRenderer.invoke('skills:delete', name),
 
+  searchRemoteSkills: (query) => ipcRenderer.invoke('skills:searchRemote', query),
+  getRemoteSkillDetail: (id) => ipcRenderer.invoke('skills:getRemoteDetail', id),
+  installRemoteSkill: (id, target) => ipcRenderer.invoke('skills:installRemote', id, target),
+
   onEvent: (callback) => {
     const listener = (_e: Electron.IpcRendererEvent, event: AgentEvent) => {
       callback(event);

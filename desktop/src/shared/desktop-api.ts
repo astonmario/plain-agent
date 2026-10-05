@@ -28,12 +28,30 @@ export interface AppSettings {
   permissionMode: 'standard' | 'trust' | 'ask';
   proxy?: string;      // HTTP 代理 URL，如 http://127.0.0.1:7890
   noProxy?: string;    // 代理白名单，如 localhost,127.0.0.1
+  githubToken?: string; // GitHub Personal Access Token，用于技能发现
 }
 
 /** 技能列表项（不含磁盘路径） */
 export interface SkillSummary {
   name: string;
   description: string;
+}
+
+/** 远程技能（技能发现） */
+export interface RemoteSkillSummary {
+  id: string;
+  name: string;
+  description: string;
+  author: string;
+  source: 'official' | 'community';
+  sourceUrl: string;
+  stars?: number;
+  topics?: string[];
+  installable: boolean;
+}
+
+export interface RemoteSkillDetail extends RemoteSkillSummary {
+  readme: string;
 }
 
 /** 技能详情（编辑用） */
@@ -90,6 +108,11 @@ export interface DesktopAPI {
   /** 存在则更新、不存在则新建 */
   saveSkill(input: SkillDetail): Promise<SkillSaveResult>;
   deleteSkill(name: string): Promise<SkillSaveResult>;
+
+  // 技能发现
+  searchRemoteSkills(query: string): Promise<RemoteSkillSummary[]>;
+  getRemoteSkillDetail(id: string): Promise<RemoteSkillDetail>;
+  installRemoteSkill(id: string, target: 'global' | 'project'): Promise<SkillSaveResult>;
 
   // 事件订阅
   onEvent(callback: (event: AgentEvent) => void): () => void;

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback, isValidElement } from 'react'
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AgentEvent, Session, ChatMessage, InteractionQuestion } from '@plain-agent/domain/types';
-import type { AppSettings, SkillDetail, SkillSummary } from '../../shared/desktop-api';
+import type { AppSettings, SkillDetail, SkillSummary, Workspace } from '../../shared/desktop-api';
 import { McpConfigModal } from './McpConfig';
 import { SkillDiscovery } from './SkillDiscovery';
 
@@ -181,6 +181,7 @@ function App() {
   const [showSkills, setShowSkills] = useState(false);
   const [showSkillDiscovery, setShowSkillDiscovery] = useState(false);
   const [showMcpConfig, setShowMcpConfig] = useState(false);
+  const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [settingsForm, setSettingsForm] = useState<AppSettings | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
@@ -204,6 +205,7 @@ function App() {
   // 初始化：加载配置、会话列表，订阅事件
   useEffect(() => {
     window.api.getConfig().then(setConfig);
+    window.api.getWorkspace().then(setWorkspace);
 
     // StrictMode 下 effect 会执行两次，用 ref 保证会话初始化只跑一次
     // （注意：只守卫 initialize，事件订阅必须照常建立/清理）
@@ -278,6 +280,21 @@ function App() {
     setShowSettings(false);
     window.api.getConfig().then(setConfig);
   }, [settingsForm]);
+
+  /** 选择工作区 */
+  const selectWorkspace = useCallback(async () => {
+    const ws = await window.api.selectWorkspace();
+    if (ws) {
+      setWorkspace(ws);
+    }
+  }, []);
+
+  /** 清除工作区 */
+  const clearWorkspace = useCallback(async () => {
+    if (!confirm('确定要清除当前工作区吗？将回到默认模式。')) return;
+    await window.api.clearWorkspace();
+    setWorkspace(null);
+  }, []);
 
   /** 开始编辑会话标题 */
   const startEditSession = useCallback((sessionId: string, currentTitle: string, e: React.MouseEvent) => {
@@ -558,6 +575,30 @@ function App() {
             <IconPlus />
           </button>
         </div>
+
+        {/* 工作区选择 */}
+        <div className="workspace-section">
+          {workspace ? (
+            <div className="workspace-active">
+              <div className="workspace-info">
+                <span className="workspace-icon">📁</span>
+                <div className="workspace-details">
+                  <span className="workspace-name">{workspace.name}</span>
+                  <span className="workspace-path">{workspace.path}</span>
+                </div>
+              </div>
+              <button className="btn-workspace-clear" onClick={clearWorkspace} title="清除工作区">
+                ✕
+              </button>
+            </div>
+          ) : (
+            <button className="btn-select-workspace" onClick={selectWorkspace}>
+              <span className="workspace-icon">📁</span>
+              <span>选择工作区</span>
+            </button>
+          )}
+        </div>
+
         <div className="session-list">
           {sessions.length === 0 && (
             <div className="session-empty">暂无会话</div>
@@ -754,7 +795,7 @@ function App() {
             <button className="modal-close" onClick={() => setShowSkillDiscovery(false)}>
               <IconClose />
             </button>
-            <SkillDiscovery />
+            <SkillDiscovery hasWorkspace={workspace !== null} />
           </div>
         </div>
       )}

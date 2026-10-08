@@ -3,7 +3,7 @@
  * 创建窗口、注册 IPC、管理 Agent 服务
  */
 
-import { app, shell, BrowserWindow, ipcMain } from 'electron';
+import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron';
 import { join } from 'path';
 import {
   createUserSkill,
@@ -192,6 +192,30 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('skills:installRemote', async (_e, id: string, target: 'global' | 'project') => {
     return agentService!.installRemoteSkill(id, target);
+  });
+
+  // 工作区管理
+  ipcMain.handle('workspace:get', () => {
+    return agentService!.getWorkspace();
+  });
+
+  ipcMain.handle('workspace:select', async () => {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      properties: ['openDirectory'],
+      title: '选择工作区目录',
+      message: '选择一个项目目录作为工作区',
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+
+    const workspacePath = result.filePaths[0];
+    return agentService!.setWorkspace(workspacePath);
+  });
+
+  ipcMain.handle('workspace:clear', () => {
+    agentService!.clearWorkspace();
   });
 
   // 事件转发：将 agent 事件推送到渲染进程

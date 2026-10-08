@@ -72,6 +72,7 @@ export class AgentService {
   private mcpTools: Tool[] = [];
   private mcpCleanup: (() => Promise<void>) | null = null;
   private userDataDir: string;
+  private currentWorkspace: { path: string; name: string } | null = null;
 
   constructor() {
     // 加载环境变量（作为 fallback 层）
@@ -459,7 +460,7 @@ export class AgentService {
 
     const options: SkillInstallOptions = {
       target,
-      projectDir: target === 'project' ? process.cwd() : undefined,
+      projectDir: target === 'project' ? this.currentWorkspace?.path : undefined,
     };
 
     const result = await installRemoteSkill(detail, options);
@@ -467,6 +468,31 @@ export class AgentService {
       ok: result.ok,
       message: result.message,
     };
+  }
+
+  // ============ 工作区管理 ============
+
+  /**
+   * 获取当前工作区
+   */
+  getWorkspace(): { path: string; name: string } | null {
+    return this.currentWorkspace;
+  }
+
+  /**
+   * 设置工作区
+   */
+  setWorkspace(path: string): { path: string; name: string } {
+    const name = path.split(/[/\\]/).filter(Boolean).pop() || 'workspace';
+    this.currentWorkspace = { path, name };
+    return this.currentWorkspace;
+  }
+
+  /**
+   * 清除工作区
+   */
+  clearWorkspace(): void {
+    this.currentWorkspace = null;
   }
 
   /** 销毁服务 */

@@ -43,6 +43,10 @@ const api: DesktopAPI = {
   getRemoteSkillDetail: (id) => ipcRenderer.invoke('skills:getRemoteDetail', id),
   installRemoteSkill: (id, target) => ipcRenderer.invoke('skills:installRemote', id, target),
 
+  getWorkspace: () => ipcRenderer.invoke('workspace:get'),
+  selectWorkspace: () => ipcRenderer.invoke('workspace:select'),
+  clearWorkspace: () => ipcRenderer.invoke('workspace:clear'),
+
   onEvent: (callback) => {
     const listener = (_e: Electron.IpcRendererEvent, event: AgentEvent) => {
       callback(event);

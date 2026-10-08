@@ -31,6 +31,12 @@ export interface AppSettings {
   githubToken?: string; // GitHub Personal Access Token，用于技能发现
 }
 
+/** 工作区信息 */
+export interface Workspace {
+  path: string;        // 工作区目录路径
+  name: string;        // 工作区名称（目录名）
+}
+
 /** 技能列表项（不含磁盘路径） */
 export interface SkillSummary {
   name: string;
@@ -113,6 +119,11 @@ export interface DesktopAPI {
   searchRemoteSkills(query: string): Promise<RemoteSkillSummary[]>;
   getRemoteSkillDetail(id: string): Promise<RemoteSkillDetail>;
   installRemoteSkill(id: string, target: 'global' | 'project'): Promise<SkillSaveResult>;
+
+  // 工作区管理
+  getWorkspace(): Promise<Workspace | null>;
+  selectWorkspace(): Promise<Workspace | null>;
+  clearWorkspace(): Promise<void>;
 
   // 事件订阅
   onEvent(callback: (event: AgentEvent) => void): () => void;

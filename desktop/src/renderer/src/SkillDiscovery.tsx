@@ -6,7 +6,11 @@
 import React, { useState, useEffect } from 'react';
 import type { RemoteSkillSummary, RemoteSkillDetail } from '../shared/desktop-api';
 
-export function SkillDiscovery(): JSX.Element {
+interface SkillDiscoveryProps {
+  hasWorkspace: boolean; // 是否已选择工作区
+}
+
+export function SkillDiscovery({ hasWorkspace }: SkillDiscoveryProps): JSX.Element {
   const [query, setQuery] = useState('');
   const [skills, setSkills] = useState<RemoteSkillSummary[]>([]);
   const [loading, setLoading] = useState(false);
@@ -231,14 +235,27 @@ export function SkillDiscovery(): JSX.Element {
                     >
                       {installing ? '安装中...' : '安装到全局'}
                     </button>
-                    <button
-                      onClick={() => handleInstall(selectedSkill.id, 'project')}
-                      disabled={installing}
-                      className="install-button secondary"
-                    >
-                      {installing ? '安装中...' : '安装到项目'}
-                    </button>
+                    {hasWorkspace && (
+                      <button
+                        onClick={() => handleInstall(selectedSkill.id, 'project')}
+                        disabled={installing}
+                        className="install-button secondary"
+                      >
+                        {installing ? '安装中...' : '安装到项目'}
+                      </button>
+                    )}
                   </div>
+                  <p style={{ marginTop: '12px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                    {hasWorkspace
+                      ? '全局: ~/.plain-agent/skills/ | 项目: 当前工作区/.plain-agent/skills/'
+                      : '技能将安装到: ~/.plain-agent/skills/'
+                    }
+                  </p>
+                  {!hasWorkspace && (
+                    <p style={{ marginTop: '8px', fontSize: '12px', color: 'var(--text-tertiary)' }}>
+                      💡 提示: 选择工作区后可以安装到项目目录
+                    </p>
+                  )}
                 </div>
               )}
 

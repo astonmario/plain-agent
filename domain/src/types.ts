@@ -115,6 +115,8 @@ export interface ToolContext {
   gitBashPath?: string;
   /** 可用技能注册表（agent 每次提交任务时构建；use_skill 用） */
   skills?: Map<string, SkillEntry>;
+  /** 子 Agent 运行时（SubagentRuntime）；undefined = 子 Agent 不可用 */
+  subagentRuntime?: any;
 }
 
 // ============ 存储接口（依赖倒置）============
@@ -184,6 +186,14 @@ export interface AgentConfig {
   historyManagement?: HistoryManagementConfig;
   /** 自定义 system prompt（默认使用内置提示词） */
   systemPrompt?: string;
+  /** 启用子 Agent 功能（默认 false） */
+  enableSubagents?: boolean;
+  /** 子 Agent 配置 */
+  subagentConfig?: {
+    maxConcurrency?: number;
+    defaultTimeout?: number;
+    maxDepth?: number;
+  };
 }
 
 // ============ 消息历史管理配置 ============

@@ -46,7 +46,8 @@ async function testLogFile(): Promise<void> {
 
     const job = jobs.get(id);
     assert(job !== null && job.done === true, '任务已完成');
-    assert(job?.output.includes('hello') && job?.output.includes('world'), '内存输出包含 stdout+stderr');
+    const hasOutput = job?.output.includes('hello') && job?.output.includes('world');
+    assert(hasOutput === true, '内存输出包含 stdout+stderr');
 
     // 检查日志文件
     const logPath = join(realLogDir, `${id}.log`);

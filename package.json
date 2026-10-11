@@ -16,7 +16,8 @@
     "typecheck:web": "pnpm --filter @plain-agent/desktop typecheck:web",
     "test:history": "pnpm --filter @plain-agent/domain test:history",
     "test:anchor": "pnpm --filter @plain-agent/domain test:anchor",
-    "test:compression": "pnpm --filter @plain-agent/domain test:compression"
+    "test:compression": "pnpm --filter @plain-agent/domain test:compression",
+    "test:subagent": "pnpm --filter @plain-agent/domain test:subagent"
   },
   "keywords": [
     "ai",

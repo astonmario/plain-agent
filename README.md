@@ -16,6 +16,7 @@
 - 📡 **事件驱动**：基于 EventEmitter 的实时事件流
 - 🛠️ **内置工具**：文件读写、命令执行、HTTP 请求、计算器等
 - 🔒 **权限管理**：危险操作检测和权限控制
+- 🤖 **子 Agent 协作**：任务委派、并发执行、递归子任务（实验性）
 
 ## 🚀 快速开始
 
@@ -175,6 +176,10 @@ tsx / esbuild / electron-vite 均可直接消费。
 | `job_output` / `job_kill` | 查看 / 终止后台任务 | ❌ |
 | `update_memory` | 更新 Agent 记忆 | ❌ |
 | `lookup_history` / `search_history` | 历史消息追溯与搜索 | ❌ |
+| `spawn_subagent` | 创建子 Agent 执行子任务 | ❌ |
+| `wait_subagent` | 等待子任务完成 | ❌ |
+| `cancel_subagent` | 取消子任务 | ❌ |
+| `get_subagent_status` | 查询子任务状态 | ❌ |
 
 ## 📝 使用示例
 
@@ -193,6 +198,12 @@ const agent = new PlainAgent({
   tools: getBuiltinTools(),
   storage: new MemoryStorage(),
   permissionMode: 'trust',
+  // 启用子 Agent 功能（可选）
+  enableSubagents: true,
+  subagentConfig: {
+    maxConcurrency: 5,
+    maxDepth: 3,
+  },
 });
 
 // 监听事件
@@ -203,6 +214,14 @@ agent.on('event', (event) => {
 // 提交任务
 const result = await agent.submit('读取 package.json');
 console.log(result);
+
+// 使用子 Agent（如果启用）
+const result2 = await agent.submit(`
+  创建一个子任务来分析项目结构：
+  - 使用 spawn_subagent 工具
+  - 限制只能使用只读工具
+  - 等待完成后返回结果
+`);
 
 // 清理
 agent.destroy();
@@ -218,6 +237,14 @@ agent.destroy();
 - [x] **M7**: 更多工具（搜索 glob/grep、网络请求、后台任务等）
 - [x] **M8**: 上下文压缩（三层压缩 + Anchor + 智能触发）
 - [ ] **M9**: 多 Agent 协作
+  - [x] 子 Agent 基础架构（SubagentRuntime）
+  - [x] 子任务工具（spawn/wait/cancel/status）
+  - [x] 独立状态隔离
+  - [x] 工具白名单和权限控制
+  - [x] 并发控制和递归深度限制
+  - [ ] 高级上下文管理（智能摘要）
+  - [ ] 任务持久化（SQLite）
+  - [ ] 调度器（串行/并行/DAG）
 
 ## 🧪 开发
 

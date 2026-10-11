@@ -24,6 +24,7 @@ import { JobRegistry } from './tools/jobs';
 import { DEFAULT_SYSTEM_PROMPT } from './prompt';
 import { discoverSkills, skillsCatalogPrompt } from './skills';
 import { applyProxyConfig } from './proxy';
+import { SubagentRuntime, getSubagentTools } from './subagent';
 import type {
   AgentConfig,
   AgentEvent,
@@ -82,6 +83,9 @@ export class PlainAgent extends EventEmitter {
   // 待处理的后台任务结果（agent 空闲时累积）
   private pendingJobResults: Array<{ id: string; output: string; exitCode: number | null }> = [];
 
+  // 子 Agent 运行时（可选）
+  private subagentRuntime?: SubagentRuntime;
+
   /**
    * 构造函数
    *
@@ -131,6 +135,21 @@ export class PlainAgent extends EventEmitter {
 
       // 添加到工具列表
       this.config.tools = [...this.config.tools, lookupTool, searchTool];
+    }
+
+    // 如果启用了子 Agent 功能，初始化运行时并注册工具
+    if (config.enableSubagents) {
+      this.subagentRuntime = new SubagentRuntime({
+        agentFactory: (agentConfig: AgentConfig) => new PlainAgent(agentConfig),
+        parentConfig: config,
+        maxConcurrency: config.subagentConfig?.maxConcurrency,
+        defaultTimeout: config.subagentConfig?.defaultTimeout,
+        maxDepth: config.subagentConfig?.maxDepth,
+      });
+
+      // 添加子 Agent 工具
+      const subagentTools = getSubagentTools();
+      this.config.tools = [...this.config.tools, ...subagentTools];
     }
 
     // 后台任务完成回注（bugfix 2026-09-18）：job 完成 → 空闲则标记待消化，
@@ -329,6 +348,7 @@ export class PlainAgent extends EventEmitter {
       },
       jobs: this.jobs, // bash 后台任务注册表
       skills, // 可用技能注册表（use_skill / create_skill 用）
+      subagentRuntime: this.subagentRuntime, // 子 Agent 运行时（spawn_subagent 等工具用）
     };
 
     // 发射任务开始事件

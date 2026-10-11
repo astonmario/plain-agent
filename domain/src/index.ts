@@ -53,6 +53,7 @@ export { HistoryManager, estimateTokens } from './history-manager';
 export { AnchorManager } from './anchor';
 export { CompressionTrigger } from './compression-trigger';
 export { DEFAULT_SYSTEM_PROMPT } from './prompt';
+export { SubagentRuntime, getSubagentTools } from './subagent';
 
 export type {
   AgentConfig,
@@ -92,3 +93,12 @@ export type {
   SseServerConfig,
   McpManager,
 } from './mcp';
+export type {
+  SubagentRequest,
+  SubagentResult,
+  SubagentStatus,
+  SubagentRuntime as ISubagentRuntime,
+  ContextManager,
+  ToolPolicy,
+  TaskStore,
+} from './subagent';

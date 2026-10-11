@@ -24,7 +24,8 @@
     "test:compression": "tsx test/test-smart-compression.ts",
     "test:mcp": "tsx test/test-mcp.ts",
     "test:jobs": "tsx test/test-job-persistence.ts",
-    "test:logfile": "tsx test/test-job-logfile.ts"
+    "test:logfile": "tsx test/test-job-logfile.ts",
+    "test:subagent": "tsx test/test-subagent.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",

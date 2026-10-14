@@ -5,6 +5,8 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { Message, MessageType } from '../types';
+import type { ToolCall } from '../types';
+import { ToolCallBatch } from './ToolCallDisplay';
 
 const TYPE_COLORS: Record<MessageType, string> = {
   [MessageType.SYSTEM]: '#6B7280',
@@ -35,9 +37,19 @@ export function MessageItem({ message, showTimestamp = false }: {
   const color = TYPE_COLORS[message.type];
   const label = TYPE_LABELS[message.type];
 
-  // 工具消息特殊处理，不显示在这里（由 ToolCallDisplay 处理）
+  // 工具消息：解析 JSON 渲染为卡片批次
   if (message.type === MessageType.TOOL) {
-    return null;
+    try {
+      const calls: ToolCall[] = JSON.parse(message.content);
+      return <ToolCallBatch calls={calls} />;
+    } catch {
+      // JSON 解析失败时降级为纯文本（兼容旧数据）
+      return (
+        <Box marginBottom={1}>
+          <Text dimColor>{message.content}</Text>
+        </Box>
+      );
+    }
   }
 
   return (

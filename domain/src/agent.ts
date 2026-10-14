@@ -109,6 +109,8 @@ export class PlainAgent extends EventEmitter {
     applyProxyConfig();
 
     this.config = config;
+    // 基础工具快照：下面会追加绑定本会话的工具（历史追溯等），子 Agent 只能继承快照
+    const baseTools = config.tools;
     this.storage = config.storage || null;
     this.sessionId = config.sessionId || randomUUID();
     this.systemPrompt = config.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
@@ -137,19 +139,20 @@ export class PlainAgent extends EventEmitter {
       this.config.tools = [...this.config.tools, lookupTool, searchTool];
     }
 
-    // 如果启用了子 Agent 功能，初始化运行时并注册工具
-    if (config.enableSubagents) {
+    // 子 Agent 功能：复用传入的 runtime（子 Agent 场景），或按 enableSubagents 新建
+    if (config.subagentRuntime) {
+      this.subagentRuntime = config.subagentRuntime;
+    } else if (config.enableSubagents) {
       this.subagentRuntime = new SubagentRuntime({
         agentFactory: (agentConfig: AgentConfig) => new PlainAgent(agentConfig),
-        parentConfig: config,
+        parentConfig: { ...config, tools: baseTools },
         maxConcurrency: config.subagentConfig?.maxConcurrency,
         defaultTimeout: config.subagentConfig?.defaultTimeout,
         maxDepth: config.subagentConfig?.maxDepth,
       });
-
-      // 添加子 Agent 工具
-      const subagentTools = getSubagentTools();
-      this.config.tools = [...this.config.tools, ...subagentTools];
+    }
+    if (this.subagentRuntime) {
+      this.config.tools = [...this.config.tools, ...getSubagentTools()];
     }
 
     // 后台任务完成回注（bugfix 2026-09-18）：job 完成 → 空闲则标记待消化，
@@ -441,6 +444,7 @@ export class PlainAgent extends EventEmitter {
         messagesToSend,
         ctx,
         this.config.tools,
+        this.config.llm,
         this.config.maxIterations || 150
       );
 

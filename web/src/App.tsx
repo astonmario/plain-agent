@@ -2,8 +2,10 @@ import { useEffect, useRef, useState, useCallback, isValidElement } from 'react'
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AgentEvent, Session, ChatMessage, InteractionQuestion } from '@plain-agent/domain/types';
-import type { AgentClient, AppSettings, SkillDetail, SkillSummary, AppConfig, HistoryUsage } from './api-client';
+import type { AgentClient, AppSettings, SkillDetail, SkillSummary, AppConfig, HistoryUsage, Workspace } from './api-client';
 import { McpConfigModal } from './McpConfig';
+import { SkillDiscovery } from './SkillDiscovery';
+import './extensions.css';
 
 interface AppProps {
   client: AgentClient;
@@ -130,6 +132,8 @@ interface UIMessage {
 /** 单次工具调用展示项 */
 interface ToolCallItem {
   name: string;
+  /** LLM 的 tool_call.id，用于并发工具的 start/result 精确配对 */
+  callId?: string;
   meta?: string;
   result?: string;
   duration?: number;
@@ -168,7 +172,9 @@ function App({ client }: AppProps) {
   const [currentSessionId, setCurrentSessionId] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [showSkills, setShowSkills] = useState(false);
+  const [showSkillDiscovery, setShowSkillDiscovery] = useState(false);
   const [showMcpConfig, setShowMcpConfig] = useState(false);
+  const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [settingsForm, setSettingsForm] = useState<AppSettings | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
@@ -186,6 +192,12 @@ function App({ client }: AppProps) {
   /** EventSource 引用，用于订阅 SSE 事件 */
   const eventSourceRef = useRef<EventSource | null>(null);
 
+  // 可选能力：客户端未实现对应接口时不显示入口（如 Web 端无技能发现/工作区）
+  const supportsSkillDiscovery = Boolean(
+    client.searchRemoteSkills && client.getRemoteSkillDetail && client.installRemoteSkill
+  );
+  const supportsWorkspace = Boolean(client.getWorkspace && client.selectWorkspace && client.clearWorkspace);
+
   // 滚动到底部
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' });
@@ -194,6 +206,7 @@ function App({ client }: AppProps) {
   // 初始化：加载配置、会话列表，订阅事件
   useEffect(() => {
     client.getConfig?.().then(setConfig);
+    client.getWorkspace?.().then(setWorkspace);
 
     // StrictMode 下 effect 会执行两次，用 ref 保证会话初始化只跑一次
     // （注意：只守卫 initialize，事件订阅必须照常建立/清理）
@@ -268,6 +281,21 @@ function App({ client }: AppProps) {
     setShowSettings(false);
     client.getConfig?.().then((cfg) => cfg && setConfig(cfg));
   }, [client, settingsForm]);
+
+  /** 选择工作区（用户取消对话框时保持原状） */
+  const selectWorkspace = useCallback(async () => {
+    const ws = await client.selectWorkspace?.();
+    if (ws) {
+      setWorkspace(ws);
+    }
+  }, [client]);
+
+  /** 清除工作区 */
+  const clearWorkspace = useCallback(async () => {
+    if (!confirm('确定要清除当前工作区吗？将回到默认模式。')) return;
+    await client.clearWorkspace?.();
+    setWorkspace(null);
+  }, [client]);
 
   /** 开始编辑会话标题 */
   const startEditSession = useCallback((sessionId: string, currentTitle: string, e: React.MouseEvent) => {
@@ -374,6 +402,7 @@ function App({ client }: AppProps) {
         const gid = toolGroupIdRef.current;
         const item: ToolCallItem = {
           name: event.tool,
+          callId: event.callId,
           meta: JSON.stringify(event.args, null, 2).slice(0, 300),
         };
         if (!gid) {
@@ -391,14 +420,15 @@ function App({ client }: AppProps) {
       }
 
       case 'tool_result': {
-        // 结果挂载到组内同名且尚无结果的最后一个工具；无匹配则补一条（如工具未找到/参数解析失败）
+        // 结果挂载到组内对应工具：有 callId 按其精确配对（同轮工具可能并发），否则取同名且尚无结果的最后一个；
+        // 无匹配则补一条（如工具未找到/参数解析失败）
         const gid = toolGroupIdRef.current;
         if (!gid) break;
         setMessages((prev) =>
           prev.map((m) => {
             if (m.id !== gid || !m.tools) return m;
             const idx = [...m.tools].map((t, i) => ({ t, i }))
-              .filter(({ t }) => t.name === event.tool && !t.result)
+              .filter(({ t }) => !t.result && (event.callId ? t.callId === event.callId : t.name === event.tool))
               .pop()?.i;
             if (idx === undefined) {
               return {
@@ -563,6 +593,32 @@ function App({ client }: AppProps) {
             <IconPlus />
           </button>
         </div>
+
+        {/* 工作区选择 */}
+        {supportsWorkspace && (
+          <div className="workspace-section">
+            {workspace ? (
+              <div className="workspace-active">
+                <div className="workspace-info">
+                  <span className="workspace-icon">📁</span>
+                  <div className="workspace-details">
+                    <span className="workspace-name">{workspace.name}</span>
+                    <span className="workspace-path">{workspace.path}</span>
+                  </div>
+                </div>
+                <button className="btn-workspace-clear" onClick={clearWorkspace} title="清除工作区">
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <button className="btn-select-workspace" onClick={selectWorkspace}>
+                <span className="workspace-icon">📁</span>
+                <span>选择工作区</span>
+              </button>
+            )}
+          </div>
+        )}
+
         <div className="session-list">
           {sessions.length === 0 && (
             <div className="session-empty">暂无会话</div>
@@ -652,6 +708,14 @@ function App({ client }: AppProps) {
             <button className="btn-settings" onClick={() => setShowSkills(true)} title="技能管理">
               <IconSkills />
             </button>
+            {supportsSkillDiscovery && (
+              <button className="btn-settings" onClick={() => setShowSkillDiscovery(true)} title="技能发现">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="11" cy="11" r="8"/>
+                  <path d="m21 21-4.35-4.35"/>
+                </svg>
+              </button>
+            )}
             <button className="btn-settings" onClick={() => setShowMcpConfig(true)} title="MCP 配置">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <rect x="3" y="3" width="7" height="7"/>
@@ -744,6 +808,18 @@ function App({ client }: AppProps) {
       {/* 技能管理弹窗 */}
       {showSkills && (
         <SkillsModal client={client} onClose={() => setShowSkills(false)} />
+      )}
+
+      {/* 技能发现弹窗 */}
+      {showSkillDiscovery && (
+        <div className="modal-overlay" onClick={() => setShowSkillDiscovery(false)}>
+          <div className="modal skill-discovery-modal" onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close" onClick={() => setShowSkillDiscovery(false)}>
+              <IconClose />
+            </button>
+            <SkillDiscovery client={client} hasWorkspace={workspace !== null} />
+          </div>
+        </div>
       )}
 
       {/* MCP 配置弹窗 */}
@@ -1302,6 +1378,21 @@ function SettingsModal({
               placeholder="localhost,127.0.0.1"
             />
             <span className="form-hint">逗号分隔的域名/IP，这些地址直连不走代理</span>
+          </div>
+        </div>
+
+        {/* GitHub Token（技能发现用） */}
+        <div className="form-section">
+          <h3>GitHub Token（可选）</h3>
+          <div className="form-group">
+            <label>Personal Access Token</label>
+            <input
+              type="password"
+              value={(settings as any).githubToken ?? ''}
+              onChange={(e) => update('githubToken', e.target.value || undefined)}
+              placeholder="ghp_..."
+            />
+            <span className="form-hint">用于技能发现搜索社区技能，无 Token 时仅返回官方索引。生成地址: <a href="https://github.com/settings/tokens" target="_blank" rel="noopener noreferrer">github.com/settings/tokens</a></span>
           </div>
         </div>
 

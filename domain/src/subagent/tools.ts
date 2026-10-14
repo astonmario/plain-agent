@@ -10,6 +10,26 @@
 
 import type { Tool } from '../types';
 import type { SubagentRuntime } from './runtime';
+import type { SubagentResult } from './types';
+
+/**
+ * 等待子任务；父任务被停止时一并取消子任务，避免子 Agent 在后台继续运行
+ */
+async function waitFollowingParent(
+  runtime: SubagentRuntime,
+  runId: string,
+  signal: AbortSignal,
+  timeout?: number
+): Promise<SubagentResult> {
+  const onAbort = () => { runtime.cancel(runId).catch(() => {}); };
+  if (signal.aborted) onAbort();
+  signal.addEventListener('abort', onAbort, { once: true });
+  try {
+    return await runtime.wait(runId, timeout);
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+  }
+}
 
 /**
  * 创建子任务工具
@@ -85,7 +105,7 @@ export function createSpawnSubagentTool(): Tool {
 
         if (args.wait) {
           // 等待完成
-          const result = await runtime.wait(runId);
+          const result = await waitFollowingParent(runtime, runId, ctx.signal);
 
           if (result.status === 'completed') {
             return `Subtask completed successfully.\n\nRun ID: ${runId}\n\nResult:\n${result.output}\n\nStats: ${result.stats?.iterations} iterations, ${result.stats?.toolCalls} tool calls, ${result.stats?.duration}ms`;
@@ -103,6 +123,8 @@ export function createSpawnSubagentTool(): Tool {
     meta: {
       dangerous: false,
       readonly: false,
+      // 子 Agent 各自隔离，并发上限由 runtime 控制：同轮多个 spawn 可并行
+      concurrent: true,
       tags: ['subagent', 'delegation'],
     },
   };
@@ -144,7 +166,7 @@ export function createWaitSubagentTool(): Tool {
       }
 
       try {
-        const result = await runtime.wait(args.run_id, args.timeout);
+        const result = await waitFollowingParent(runtime, args.run_id, ctx.signal, args.timeout);
 
         if (result.status === 'completed') {
           let output = `Subtask ${args.run_id} completed successfully.\n\n`;
@@ -223,6 +245,7 @@ export function createCancelSubagentTool(): Tool {
     meta: {
       dangerous: false,
       readonly: false,
+      concurrent: true,
       tags: ['subagent'],
     },
   };

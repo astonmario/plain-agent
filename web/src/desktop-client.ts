@@ -4,10 +4,21 @@
  * 将 window.desktopAPI 包装成统一的 AgentClient 接口
  */
 
-import type { AgentClient, AppSettings, SkillSummary, SkillDetail, AppConfig, HistoryUsage } from './api-client';
+import type {
+  AgentClient,
+  AppSettings,
+  SkillSummary,
+  SkillDetail,
+  AppConfig,
+  HistoryUsage,
+  Workspace,
+  RemoteSkillSummary,
+  RemoteSkillDetail,
+  SkillInstallResult,
+} from './api-client';
 import type { AgentEvent, Session, ChatMessage } from '@plain-agent/domain/types';
 
-/** 桌面端 IPC API */
+/** 桌面端 IPC API（preload 暴露在 window.api 上；完整定义见 desktop/src/shared/desktop-api.ts） */
 interface DesktopAPI {
   submit(task: string, taskId?: string): Promise<string>;
   stop(taskId?: string): Promise<void>;
@@ -33,23 +44,25 @@ interface DesktopAPI {
   readSkill(name: string): Promise<SkillDetail | null>;
   saveSkill(input: SkillDetail): Promise<{ ok: boolean; message: string }>;
   deleteSkill(name: string): Promise<{ ok: boolean; message: string }>;
+  searchRemoteSkills(query: string): Promise<RemoteSkillSummary[]>;
+  getRemoteSkillDetail(id: string): Promise<RemoteSkillDetail>;
+  installRemoteSkill(id: string, target: 'global' | 'project'): Promise<SkillInstallResult>;
+  getWorkspace(): Promise<Workspace | null>;
+  selectWorkspace(): Promise<Workspace | null>;
+  clearWorkspace(): Promise<void>;
   onEvent(callback: (event: AgentEvent) => void): () => void;
-}
-
-declare global {
-  interface Window {
-    api: DesktopAPI;
-  }
 }
 
 export class DesktopClient implements AgentClient {
   private api: DesktopAPI;
 
   constructor() {
-    if (!window.api) {
+    // 不声明全局 Window.api：桌面端 env.d.ts 已用完整类型声明，重复声明会类型冲突
+    const api = (window as unknown as { api?: DesktopAPI }).api;
+    if (!api) {
       throw new Error('desktopAPI not available. Are you running in Electron?');
     }
-    this.api = window.api;
+    this.api = api;
   }
 
   // ---- 会话管理 ----
@@ -196,6 +209,34 @@ export class DesktopClient implements AgentClient {
 
   async getMcpToolCount(): Promise<number> {
     return this.api.getMcpToolCount();
+  }
+
+  // ---- 技能发现 ----
+
+  async searchRemoteSkills(query: string): Promise<RemoteSkillSummary[]> {
+    return this.api.searchRemoteSkills(query);
+  }
+
+  async getRemoteSkillDetail(id: string): Promise<RemoteSkillDetail> {
+    return this.api.getRemoteSkillDetail(id);
+  }
+
+  async installRemoteSkill(id: string, target: 'global' | 'project'): Promise<SkillInstallResult> {
+    return this.api.installRemoteSkill(id, target);
+  }
+
+  // ---- 工作区 ----
+
+  async getWorkspace(): Promise<Workspace | null> {
+    return this.api.getWorkspace();
+  }
+
+  async selectWorkspace(): Promise<Workspace | null> {
+    return this.api.selectWorkspace();
+  }
+
+  async clearWorkspace(): Promise<void> {
+    await this.api.clearWorkspace();
   }
 
   // ---- 事件订阅 ----

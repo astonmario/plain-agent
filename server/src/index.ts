@@ -77,20 +77,27 @@ try {
 const info = {
   model: process.env.MODEL || 'deepseek-chat',
   baseUrl: process.env.BASE_URL,
-  toolCount: getBuiltinTools().length,
+  toolCount: getBuiltinTools().length + 4, // +4 for subagent tools
   persisted,
   project: process.cwd(),
 };
 
 function createAgent(sessionId: string): AgentLike {
+  const llmConfig = {
+    provider: 'openai' as const,
+    apiKey: process.env.API_KEY!,
+    model: info.model,
+    baseUrl: info.baseUrl,
+  };
+
   return new PlainAgent({
-    llm: {
-      provider: 'openai',
-      apiKey: process.env.API_KEY!,
-      model: info.model,
-      baseUrl: info.baseUrl,
-    },
+    llm: llmConfig,
     tools: getBuiltinTools(),
+    enableSubagents: true,
+    subagentConfig: {
+      maxConcurrency: 3,
+      maxDepth: 2,
+    },
     storage,
     sessionId,
     permissionMode: (process.env.PERMISSION_MODE as PermissionMode) || 'trust',

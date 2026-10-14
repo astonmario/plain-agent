@@ -37,8 +37,9 @@ export type AgentEvent =
   | { type: 'task-end'; taskId: string; timestamp: number }
   | { type: 'iteration'; index: number; timestamp: number }
   | { type: 'thinking'; content: string; timestamp: number }
-  | { type: 'tool_start'; tool: string; args: any; timestamp: number }
-  | { type: 'tool_result'; tool: string; result: string; duration: number; timestamp: number }
+  /** callId = LLM 返回的 tool_call.id；同一轮工具可能并发执行，界面应按 callId 配对 start/result */
+  | { type: 'tool_start'; tool: string; args: any; callId?: string; timestamp: number }
+  | { type: 'tool_result'; tool: string; result: string; duration: number; callId?: string; timestamp: number }
   | { type: 'text_delta'; delta: string; timestamp: number }
   | { type: 'assistant'; message: string; timestamp: number }
   | { type: 'error'; error: SerializedError; timestamp: number }
@@ -46,7 +47,10 @@ export type AgentEvent =
   | { type: 'stopped'; timestamp: number }
   | { type: 'compression'; level: 1 | 2 | 3; tokensBefore: number; tokensAfter: number; timestamp: number }
   | { type: 'session-warning'; reason: 'too-long' | 'frequent-compression'; suggestion: string; timestamp: number }
-  | { type: 'interaction'; id: string; questions: InteractionQuestion[]; timestamp: number };
+  | { type: 'interaction'; id: string; questions: InteractionQuestion[]; timestamp: number }
+  | { type: 'subagent-created'; runId: string; task: string; depth: number; timestamp: number }
+  | { type: 'subagent-progress'; runId: string; message: string; timestamp: number }
+  | { type: 'subagent-completed'; runId: string; status: 'completed' | 'failed' | 'cancelled' | 'timeout'; output?: string; timestamp: number };
 
 /** ask_question 工具的单个问题 */
 export interface InteractionQuestion {
@@ -194,6 +198,11 @@ export interface AgentConfig {
     defaultTimeout?: number;
     maxDepth?: number;
   };
+  /**
+   * 复用已有的子 Agent 运行时（内部用：子 Agent 共享父级 runtime，
+   * 使并发与递归深度全局统一计算）。优先于 enableSubagents。
+   */
+  subagentRuntime?: any;
 }
 
 // ============ 消息历史管理配置 ============

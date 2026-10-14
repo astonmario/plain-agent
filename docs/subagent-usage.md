@@ -242,19 +242,26 @@ SubagentRuntime
 ├── cancel()     - 取消任务
 └── getStatus()  - 查询状态
 
-ContextManager
-├── prepareSubagentContext()  - 准备上下文
-└── injectResult()            - 结果回注
-
 ToolPolicy
-├── filterTools()     - 过滤工具
+├── filterTools()     - 过滤工具（未指定白名单时只给 meta.readonly 的工具）
 └── checkToolCall()   - 检查权限
 
-TaskStore
+TaskStore（默认内存实现，SQLite 待做）
 ├── saveTask()        - 保存任务
 ├── updateTaskStatus() - 更新状态
 └── getTaskHistory()  - 查询历史
 ```
+
+上下文传递目前只有一种方式：`role`、`context_summary`、`relevant_files` 写入子 Agent 的
+system prompt，任务本身作为 user 消息提交；子 Agent 的最终回复作为工具结果返回给父 Agent。
+
+隔离规则：
+
+- 子 Agent 的 `sessionId` 即 `runId`，不写父会话存储
+- 子 Agent 只继承父 Agent 的基础工具，不继承绑定父历史的 `lookup_history` / `search_history`
+- 子 Agent 权限模式默认与父 Agent 一致
+- 子 Agent 共享父级 runtime，并发数与递归深度全局统一计算；到达深度上限的子 Agent 不再拿到 `spawn_subagent` 工具
+- 父任务被停止时，正在 `wait` 的子任务会被一并取消
 
 ### 数据流
 
@@ -266,29 +273,24 @@ SubagentRuntime
 子 Agent 实例
   ↓ execute
 SubagentResult
-  ↓ inject
+  ↓ 工具结果
 父 Agent 对话历史
 ```
 
 ## 测试
 
-运行子agent测试：
-
 ```bash
-# 完整测试套件
+# 运行时单元测试（不调用 LLM，假 Agent，秒级完成）
 pnpm test:subagent
 
-# 或直接运行
-tsx domain/test/test-subagent.ts
+# 端到端测试（真实调用 LLM，读取根目录 .env）
+pnpm test:subagent:e2e
 ```
 
-测试覆盖：
-- ✅ 基础子任务创建和等待
-- ✅ 并发子任务
-- ✅ 工具白名单
-- ✅ 递归深度限制
-- ✅ 超时处理
-- ✅ 取消任务
+单元测试覆盖：spawn/wait、上下文隔离、工具白名单、并发上限（含并发 spawn 竞态）、
+递归深度、失败、超时、取消（终态不被覆盖）。
+
+端到端测试覆盖：同步委派、并行委派、递归委派 + 深度限制。
 
 ## 配置参考
 

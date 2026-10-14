@@ -17,7 +17,8 @@
     "test:history": "pnpm --filter @plain-agent/domain test:history",
     "test:anchor": "pnpm --filter @plain-agent/domain test:anchor",
     "test:compression": "pnpm --filter @plain-agent/domain test:compression",
-    "test:subagent": "pnpm --filter @plain-agent/domain test:subagent"
+    "test:subagent": "pnpm --filter @plain-agent/domain test:subagent",
+    "test:subagent:e2e": "pnpm --filter @plain-agent/domain test:subagent:e2e"
   },
   "keywords": [
     "ai",

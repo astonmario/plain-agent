@@ -18,6 +18,7 @@ export interface AppSettings {
   permissionMode?: 'standard' | 'trust' | 'ask';
   proxy?: string;
   noProxy?: string;
+  githubToken?: string; // 技能发现用
   [key: string]: unknown;
 }
 
@@ -56,6 +57,37 @@ export interface HistoryUsage {
   needsCompression: boolean;
 }
 
+/** 工作区信息 */
+export interface Workspace {
+  /** 工作区目录路径 */
+  path: string;
+  /** 工作区名称（目录名） */
+  name: string;
+}
+
+/** 远程技能（技能发现） */
+export interface RemoteSkillSummary {
+  id: string;
+  name: string;
+  description: string;
+  author: string;
+  source: 'official' | 'community';
+  sourceUrl: string;
+  stars?: number;
+  topics?: string[];
+  installable: boolean;
+}
+
+export interface RemoteSkillDetail extends RemoteSkillSummary {
+  readme: string;
+}
+
+/** 技能安装结果 */
+export interface SkillInstallResult {
+  ok: boolean;
+  message: string;
+}
+
 /** 统一 API 客户端接口 */
 export interface AgentClient {
   // ---- 会话管理 ----
@@ -92,6 +124,17 @@ export interface AgentClient {
   saveSkill(name: string, content: string): Promise<void>;
   deleteSkill(name: string): Promise<void>;
   readSkill?(name: string): Promise<SkillDetail | null>; // 桌面端特有
+
+  // ---- 技能发现（桌面端特有；未实现时界面不显示入口） ----
+  searchRemoteSkills?(query: string): Promise<RemoteSkillSummary[]>;
+  getRemoteSkillDetail?(id: string): Promise<RemoteSkillDetail>;
+  installRemoteSkill?(id: string, target: 'global' | 'project'): Promise<SkillInstallResult>;
+
+  // ---- 工作区（桌面端特有；未实现时界面不显示入口） ----
+  getWorkspace?(): Promise<Workspace | null>;
+  /** 打开目录选择对话框；用户取消返回 null */
+  selectWorkspace?(): Promise<Workspace | null>;
+  clearWorkspace?(): Promise<void>;
 
   // ---- MCP 配置 ----
   getMcpConfig(): Promise<Record<string, unknown>>;

@@ -98,7 +98,6 @@ export type {
   SubagentResult,
   SubagentStatus,
   SubagentRuntime as ISubagentRuntime,
-  ContextManager,
   ToolPolicy,
   TaskStore,
 } from './subagent';

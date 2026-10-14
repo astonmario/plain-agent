@@ -1,18 +1,22 @@
 /**
  * 技能发现页面
- * 搜索、查看和安装远程技能
+ * 搜索、查看和安装远程技能（仅在客户端实现了技能发现接口时使用）
  */
 
-import React, { useState, useEffect } from 'react';
-import type { RemoteSkillSummary, RemoteSkillDetail } from '../shared/desktop-api';
+import { useState } from 'react';
+import type { AgentClient, RemoteSkillSummary, RemoteSkillDetail } from './api-client';
 
 interface SkillDiscoveryProps {
-  hasWorkspace: boolean; // 是否已选择工作区
+  client: AgentClient;
+  /** 是否已选择工作区（决定能否安装到项目目录） */
+  hasWorkspace: boolean;
 }
 
-export function SkillDiscovery({ hasWorkspace }: SkillDiscoveryProps): JSX.Element {
+export function SkillDiscovery({ client, hasWorkspace }: SkillDiscoveryProps) {
   const [query, setQuery] = useState('');
-  const [skills, setSkills] = useState<RemoteSkillSummary[]>([]);
+  /** 完整搜索结果；过滤在渲染时进行，切换过滤器无需重新搜索 */
+  const [results, setResults] = useState<RemoteSkillSummary[]>([]);
+  const [searched, setSearched] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedSkill, setSelectedSkill] = useState<RemoteSkillDetail | null>(null);
@@ -20,31 +24,19 @@ export function SkillDiscovery({ hasWorkspace }: SkillDiscoveryProps): JSX.Eleme
   const [installing, setInstalling] = useState(false);
   const [filter, setFilter] = useState<'all' | 'official' | 'community'>('all');
 
+  const skills = results.filter(skill => filter === 'all' || skill.source === filter);
+
   // 搜索技能
   const handleSearch = async () => {
-    if (!query.trim()) {
-      setError('请输入搜索关键词');
-      return;
-    }
+    if (!query.trim() || !client.searchRemoteSkills) return;
 
     setLoading(true);
     setError(null);
-    setSkills([]);
+    setResults([]);
 
     try {
-      const results = await window.api.searchRemoteSkills(query);
-
-      // 应用过滤器
-      const filtered = results.filter(skill => {
-        if (filter === 'all') return true;
-        return skill.source === filter;
-      });
-
-      setSkills(filtered);
-
-      if (filtered.length === 0) {
-        setError('未找到匹配的技能');
-      }
+      setResults(await client.searchRemoteSkills(query));
+      setSearched(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : '搜索失败');
     } finally {
@@ -54,12 +46,12 @@ export function SkillDiscovery({ hasWorkspace }: SkillDiscoveryProps): JSX.Eleme
 
   // 查看详情
   const handleViewDetail = async (skill: RemoteSkillSummary) => {
+    if (!client.getRemoteSkillDetail) return;
     setDetailLoading(true);
     setSelectedSkill(null);
 
     try {
-      const detail = await window.api.getRemoteSkillDetail(skill.id);
-      setSelectedSkill(detail);
+      setSelectedSkill(await client.getRemoteSkillDetail(skill.id));
     } catch (err) {
       setError(err instanceof Error ? err.message : '获取详情失败');
     } finally {
@@ -69,6 +61,7 @@ export function SkillDiscovery({ hasWorkspace }: SkillDiscoveryProps): JSX.Eleme
 
   // 安装技能
   const handleInstall = async (id: string, target: 'global' | 'project') => {
+    if (!client.installRemoteSkill) return;
     if (!confirm(`确认安装技能到 ${target === 'global' ? '全局' : '项目'} 目录？`)) {
       return;
     }
@@ -76,7 +69,7 @@ export function SkillDiscovery({ hasWorkspace }: SkillDiscoveryProps): JSX.Eleme
     setInstalling(true);
 
     try {
-      const result = await window.api.installRemoteSkill(id, target);
+      const result = await client.installRemoteSkill(id, target);
 
       if (result.ok) {
         alert(`✅ ${result.message}`);
@@ -90,20 +83,6 @@ export function SkillDiscovery({ hasWorkspace }: SkillDiscoveryProps): JSX.Eleme
       setInstalling(false);
     }
   };
-
-  // 过滤器变化时重新搜索
-  useEffect(() => {
-    if (skills.length > 0 || query) {
-      // 已有结果或查询时，重新应用过滤
-      const filtered = skills.filter(skill => {
-        if (filter === 'all') return true;
-        return skill.source === filter;
-      });
-      if (filtered.length !== skills.length) {
-        handleSearch();
-      }
-    }
-  }, [filter]);
 
   return (
     <div className="skill-discovery">
@@ -155,6 +134,11 @@ export function SkillDiscovery({ hasWorkspace }: SkillDiscoveryProps): JSX.Eleme
       {error && (
         <div className="error-message">
           ⚠️ {error}
+        </div>
+      )}
+      {!error && searched && !loading && skills.length === 0 && (
+        <div className="error-message">
+          ⚠️ 未找到匹配的技能
         </div>
       )}
 

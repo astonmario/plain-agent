@@ -28,6 +28,8 @@ export type ToolCallStatus = 'running' | 'success' | 'error';
 /** 工具调用信息 */
 export interface ToolCall {
   id: string;
+  /** LLM 的 tool_call.id，用于并发工具的 start/result 精确配对 */
+  callId?: string;
   tool: string;
   args: Record<string, unknown>;
   description?: string;

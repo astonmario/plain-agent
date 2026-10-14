@@ -148,9 +148,16 @@ export class AgentService {
     // 应用代理配置（每次创建 agent 时应用，支持运行时修改）
     applyProxyConfig(this.settings.proxy, this.settings.noProxy);
 
+    const llmConfig = buildLLMConfigFromSettings(this.settings);
+
     const agent = new PlainAgent({
-      llm: buildLLMConfigFromSettings(this.settings),
+      llm: llmConfig,
       tools: [...getBuiltinTools(), ...this.mcpTools],
+      enableSubagents: true,
+      subagentConfig: {
+        maxConcurrency: 3,
+        maxDepth: 2,
+      },
       storage: this.storage,
       sessionId,
       permissionMode: this.settings.permissionMode,

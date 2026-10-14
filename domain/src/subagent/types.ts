@@ -149,26 +149,6 @@ export interface SubagentRuntime {
   ): void;
 }
 
-// ============ 上下文管理器 ============
-
-export interface ContextManager {
-  /**
-   * 为子 Agent 准备上下文（摘要 + 相关文件）
-   */
-  prepareSubagentContext(
-    parentMessages: any[],
-    request: SubagentRequest
-  ): Promise<any[]>;
-
-  /**
-   * 将子 Agent 结果压缩后注入父 Agent
-   */
-  injectResult(
-    parentMessages: any[],
-    result: SubagentResult
-  ): any[];
-}
-
 // ============ 工具权限策略 ============
 
 export interface ToolPolicy {
@@ -235,13 +215,13 @@ export interface SubagentRun {
   runId: string;
   request: SubagentRequest;
   status: SubagentStatus['status'];
-  agent: any; // PlainAgent 实例
-  abortController: AbortController;
+  agent?: any; // PlainAgent 实例（工厂失败时为空）
+  /** 终态结果（completed/failed/cancelled/timeout 先到先得，只写一次） */
   promise: Promise<SubagentResult>;
+  resolveDone: (result: SubagentResult) => void;
   result?: SubagentResult;
-  error?: Error;
   createdAt: number;
   startedAt?: number;
   finishedAt?: number;
-  depth: number; // 递归深度
+  depth: number; // 递归深度（顶层子任务为 0）
 }

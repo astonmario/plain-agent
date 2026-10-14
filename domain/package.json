@@ -25,7 +25,9 @@
     "test:mcp": "tsx test/test-mcp.ts",
     "test:jobs": "tsx test/test-job-persistence.ts",
     "test:logfile": "tsx test/test-job-logfile.ts",
-    "test:subagent": "tsx test/test-subagent.ts"
+    "test:loop": "tsx test/test-loop.ts",
+    "test:subagent": "tsx test/test-subagent-runtime.ts",
+    "test:subagent:e2e": "tsx test/test-subagent.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",

@@ -77,10 +77,12 @@ export default function App(props: AppProps) {
   const flushTools = useCallback(() => {
     if (toolCallsRef.current.size > 0) {
       const calls = Array.from(toolCallsRef.current.values());
-      setToolCalls(calls);
+      // 固化到 Static 历史（与 78425b2 之前一致），而非只放实时区
+      addMessage(MessageType.TOOL, JSON.stringify(calls));
       toolCallsRef.current.clear();
+      setToolCalls([]); // 清空实时区
     }
-  }, []);
+  }, [addMessage]);
 
   const flushStream = useCallback(() => {
     if (streamRef.current) {
@@ -129,6 +131,7 @@ export default function App(props: AppProps) {
           const toolId = `tool-${toolIdCounter.current}`;
           toolCallsRef.current.set(toolId, {
             id: toolId,
+            callId: e.callId,
             tool: e.tool,
             args: e.args,
             status: 'running',
@@ -136,12 +139,14 @@ export default function App(props: AppProps) {
           setToolCalls(Array.from(toolCallsRef.current.values()));
           break;
         case 'tool_result':
-          // 查找对应的 tool_start，更新结果（从后往前找最近的匹配项）
+          // 查找对应的 tool_start：有 callId 按其精确配对（同轮工具可能并发），否则从后往前找同名运行中的
           const toolsArray = Array.from(toolCallsRef.current.values());
           let foundTool: ToolCall | undefined;
           for (let i = toolsArray.length - 1; i >= 0; i--) {
-            if (toolsArray[i].tool === e.tool && toolsArray[i].status === 'running') {
-              foundTool = toolsArray[i];
+            const t = toolsArray[i];
+            if (t.status !== 'running') continue;
+            if (e.callId ? t.callId === e.callId : t.tool === e.tool) {
+              foundTool = t;
               break;
             }
           }

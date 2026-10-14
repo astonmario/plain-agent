@@ -1,0 +1,420 @@
+/* 工作区选择样式 */
+.workspace-section {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.btn-select-workspace {
+  width: 100%;
+  padding: 12px;
+  background: var(--bg-main);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text-secondary);
+  transition: all 0.2s;
+}
+
+.btn-select-workspace:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.workspace-active {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  background: var(--accent-light);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+}
+
+.workspace-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.workspace-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.workspace-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.workspace-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workspace-path {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.btn-workspace-clear {
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 18px;
+  line-height: 1;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.btn-workspace-clear:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
+
+/* 技能发现样式 */
+.skill-discovery-modal {
+  width: 90vw;
+  max-width: 1000px;
+  height: 85vh;
+  max-height: 800px;
+  overflow: hidden;
+}
+
+.skill-discovery {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.skill-discovery-header {
+  padding: 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.skill-discovery-header h2 {
+  margin: 0 0 8px 0;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.subtitle {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.search-section {
+  padding: 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.search-bar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.search-bar input {
+  flex: 1;
+  padding: 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  background: var(--bg-main);
+  color: var(--text);
+}
+
+.search-bar input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.search-bar button {
+  padding: 10px 24px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+  white-space: nowrap;
+}
+
+.search-bar button:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.search-bar button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.filter-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.filter-tabs button {
+  padding: 8px 16px;
+  background: var(--bg-tool);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: var(--text);
+}
+
+.filter-tabs button:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+
+.filter-tabs button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.error-message {
+  padding: 16px 24px;
+  background: #fef2f2;
+  border-left: 3px solid #ef4444;
+  color: #991b1b;
+  font-size: 14px;
+}
+
+.skills-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+  align-content: start;
+}
+
+.skill-card {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.2s;
+  background: var(--bg-main);
+  height: fit-content;
+}
+
+.skill-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+}
+
+.skill-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.skill-source {
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tool);
+  color: var(--text-secondary);
+}
+
+.skill-stars {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.skill-name {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+  color: var(--text);
+}
+
+.skill-description {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.skill-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skill-author {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.skill-topics {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.topic-tag {
+  font-size: 11px;
+  padding: 2px 6px;
+  background: var(--bg-tool);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+}
+
+.modal-body {
+  padding: 24px;
+  overflow-y: auto;
+  max-height: calc(85vh - 200px);
+}
+
+.skill-detail-info {
+  margin-bottom: 24px;
+}
+
+.skill-detail-info p {
+  margin-bottom: 12px;
+  line-height: 1.6;
+}
+
+.skill-detail-info strong {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.skill-detail-info a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.skill-detail-info a:hover {
+  text-decoration: underline;
+}
+
+.skill-readme {
+  margin-bottom: 24px;
+}
+
+.skill-readme h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.readme-content {
+  max-height: 400px;
+  overflow-y: auto;
+  padding: 16px;
+  background: var(--bg-tool);
+  border-radius: var(--radius-md);
+}
+
+.readme-content pre {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.install-actions {
+  border-top: 1px solid var(--border);
+  padding-top: 24px;
+}
+
+.security-warning {
+  padding: 12px 16px;
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: var(--radius-md);
+  color: #92400e;
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+.install-buttons {
+  display: flex;
+  gap: 12px;
+}
+
+.install-button {
+  flex: 1;
+  padding: 12px 24px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.install-button:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.install-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.install-button.secondary {
+  background: var(--bg-tool);
+  color: var(--text);
+}
+
+.install-button.secondary:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.not-installable {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-secondary);
+  background: var(--bg-tool);
+  border-radius: var(--radius-md);
+}
+
+.loading-spinner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px;
+  color: var(--text-secondary);
+  font-size: 16px;
+}

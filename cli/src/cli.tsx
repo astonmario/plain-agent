@@ -104,20 +104,27 @@ async function loadMcp(): Promise<void> {
 const info = {
   model: process.env.MODEL || 'deepseek-chat',
   baseUrl: process.env.BASE_URL,
-  toolCount: getBuiltinTools().length + mcpTools.length,
+  toolCount: getBuiltinTools().length + mcpTools.length + 4, // +4 for subagent tools
   persisted,
   project: process.cwd(),
 };
 
 function createAgent(sessionId?: string): PlainAgent {
+  const llmConfig = {
+    provider: 'openai' as const,
+    apiKey: process.env.API_KEY!,
+    model: info.model,
+    baseUrl: info.baseUrl,
+  };
+
   return new PlainAgent({
-    llm: {
-      provider: 'openai',
-      apiKey: process.env.API_KEY!,
-      model: info.model,
-      baseUrl: info.baseUrl,
-    },
+    llm: llmConfig,
     tools: [...getBuiltinTools(), ...mcpTools],
+    enableSubagents: true,
+    subagentConfig: {
+      maxConcurrency: 3,
+      maxDepth: 2,
+    },
     storage,
     sessionId,
     systemPrompt: TUI_SYSTEM_PROMPT,

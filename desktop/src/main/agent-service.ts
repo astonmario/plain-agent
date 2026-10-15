@@ -176,9 +176,15 @@ export class AgentService {
       },
     });
 
-    // 转发 agent 事件
+    // 转发 agent 事件（隔离错误，防止单个监听器异常影响其他监听器）
     agent.on('event', (event: AgentEvent) => {
-      this.onEventListeners.forEach(listener => listener(event));
+      this.onEventListeners.forEach(listener => {
+        try {
+          listener(event);
+        } catch (err) {
+          console.error('[AgentService] Event listener error:', err);
+        }
+      });
     });
 
     this.agents.set(sessionId, agent);

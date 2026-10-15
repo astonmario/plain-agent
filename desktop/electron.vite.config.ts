@@ -14,6 +14,10 @@ export default defineConfig({
   // 主进程：运行在 Node 环境
   main: {
     plugins: [externalizeDepsPlugin({ exclude: ['@plain-agent/domain'] })],
+    define: {
+      // 注入环境标识，用于区分开发和生产的 userData 目录
+      'process.env.ELECTRON_IS_DEV': JSON.stringify(process.env.NODE_ENV !== 'production'),
+    },
     resolve: {
       alias: {
         '@plain-agent/domain': resolve('../domain/src/index.ts'),

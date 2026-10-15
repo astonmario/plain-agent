@@ -79,7 +79,11 @@ export class AgentService {
     loadEnv();
 
     // SQLite 持久化到 userData 目录
+    // 开发环境使用独立子目录，避免和生产环境数据混淆
     this.userDataDir = app.getPath('userData');
+    if (process.env.ELECTRON_IS_DEV === 'true') {
+      this.userDataDir = join(this.userDataDir, 'dev');
+    }
     mkdirSync(this.userDataDir, { recursive: true });
     const dbPath = join(this.userDataDir, 'plain-agent.db');
     this.storage = new SQLiteStorage(dbPath);

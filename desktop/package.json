@@ -11,7 +11,52 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit",
-    "typecheck:web": "tsc -p tsconfig.web.json --noEmit"
+    "typecheck:web": "tsc -p tsconfig.web.json --noEmit",
+    "build:win": "pnpm build && pnpm exec electron-builder --win --x64",
+    "build:win:portable": "pnpm build && pnpm exec electron-builder --win portable --x64",
+    "pack": "pnpm build && pnpm exec electron-builder --dir"
+  },
+  "build": {
+    "appId": "com.plain-agent.desktop",
+    "productName": "Plain Agent",
+    "directories": {
+      "output": "dist",
+      "buildResources": "resources"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": "resources",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "resources/icon.ico",
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "signingHashAlgorithms": ["sha256"],
+      "sign": null
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Plain Agent"
+    }
   },
   "dependencies": {
     "@plain-agent/domain": "workspace:*",
@@ -29,6 +74,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^4.7.0",
     "electron": "^41.7.1",
+    "electron-builder": "^25.1.8",
     "electron-vite": "^5.0.0",
     "typescript": "^5.3.3",
     "vite": "^7.3.7"

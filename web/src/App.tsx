@@ -5,6 +5,7 @@ import type { AgentEvent, Session, ChatMessage, InteractionQuestion } from '@pla
 import type { AgentClient, AppSettings, SkillDetail, SkillSummary, AppConfig, HistoryUsage, Workspace } from './api-client';
 import { McpConfigModal } from './McpConfig';
 import { SkillDiscovery } from './SkillDiscovery';
+import './styles.css';
 import './extensions.css';
 
 interface AppProps {
@@ -926,7 +927,7 @@ function SkillsModal({ client, onClose }: { client: AgentClient; onClose: () => 
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
         <div className="skills-layout">
-          <aside className="skills-list">
+          <aside className="skills-manager-list">
             <button className="skills-new" onClick={startNew}>＋ 新建技能</button>
             {list.map((s) => (
               <button
@@ -1295,7 +1296,7 @@ function SettingsModal({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal settings-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>设置</h2>
           <button className="modal-close" onClick={onClose} title="关闭">
@@ -1307,6 +1308,7 @@ function SettingsModal({
           <div className="form-field">
             <label>API Key</label>
             <input
+              className="api-key-input"
               type="password"
               value={settings.apiKey}
               onChange={(e) => update('apiKey', e.target.value)}
@@ -1379,20 +1381,20 @@ function SettingsModal({
             />
             <span className="form-hint">逗号分隔的域名/IP，这些地址直连不走代理</span>
           </div>
-        </div>
 
-        {/* GitHub Token（技能发现用） */}
-        <div className="form-section">
-          <h3>GitHub Token（可选）</h3>
-          <div className="form-group">
-            <label>Personal Access Token</label>
-            <input
-              type="password"
-              value={(settings as any).githubToken ?? ''}
-              onChange={(e) => update('githubToken', e.target.value || undefined)}
-              placeholder="ghp_..."
-            />
-            <span className="form-hint">用于技能发现搜索社区技能，无 Token 时仅返回官方索引。生成地址: <a href="https://github.com/settings/tokens" target="_blank" rel="noopener noreferrer">github.com/settings/tokens</a></span>
+          {/* GitHub Token（技能发现用） */}
+          <div className="form-section">
+            <h3>GitHub Token（可选）</h3>
+            <div className="form-group">
+              <label>Personal Access Token</label>
+              <input
+                type="password"
+                value={(settings as any).githubToken ?? ''}
+                onChange={(e) => update('githubToken', e.target.value || undefined)}
+                placeholder="ghp_..."
+              />
+              <span className="form-hint">用于技能发现搜索社区技能，无 Token 时仅返回官方索引。生成地址: <a href="https://github.com/settings/tokens" target="_blank" rel="noopener noreferrer">github.com/settings/tokens</a></span>
+            </div>
           </div>
         </div>
 

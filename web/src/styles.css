@@ -1,31 +1,33 @@
-/* ============ 设计变量（参考元宝/豆包桌面端） ============ */
+/* Shared renderer styles for the web and desktop clients. */
 
 :root {
-  --bg-app: #f7f7f8;
-  --bg-sidebar: #f0f0f2;
+  --bg-app: #f3f6f4;
+  --bg-sidebar: #edf2ef;
   --bg-main: #ffffff;
-  --bg-input: #ffffff;
-  --bg-hover: #e9e9ec;
-  --bg-active: #e0e0e6;
-  --bg-tool: #f5f5f7;
-  --border: #e6e6e9;
-  --border-strong: #d8d8de;
-  --text: #1a1a1a;
-  --text-secondary: #6e6e78;
-  --text-tertiary: #9a9aa6;
-  --accent: #3d6bff;
-  --accent-hover: #2f5ae0;
-  --accent-light: #e8eeff;
-  --user-bubble: #3d6bff;
+  --bg-input: #fcfdfc;
+  --bg-hover: #e7eeea;
+  --bg-active: #dce7e1;
+  --bg-tool: #f4f7f5;
+  --bg-secondary: #f4f7f5;
+  --bg-tertiary: #e9efeb;
+  --border: #dfe7e2;
+  --border-strong: #cbd8d0;
+  --text: #18221d;
+  --text-secondary: #5e6d64;
+  --text-tertiary: #87958c;
+  --accent: #28756b;
+  --accent-hover: #1f5f57;
+  --accent-light: #e2f0ec;
+  --user-bubble: #28756b;
   --user-text: #ffffff;
-  --danger: #e5484d;
-  --warning: #d97706;
-  --success: #16a34a;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.08);
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
+  --danger: #c94b50;
+  --warning: #a86c19;
+  --success: #2f815b;
+  --shadow-sm: 0 1px 2px rgba(25, 49, 39, 0.06);
+  --shadow-md: 0 16px 42px rgba(25, 49, 39, 0.14);
+  --radius-sm: 6px;
+  --radius-md: 9px;
+  --radius-lg: 12px;
   --radius-full: 24px;
 }
 
@@ -43,8 +45,8 @@ body,
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
-    'Microsoft YaHei', 'Helvetica Neue', sans-serif;
+  font-family: Aptos, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei',
+    'Segoe UI', sans-serif;
   background: var(--bg-app);
   color: var(--text);
   font-size: 14px;
@@ -516,7 +518,7 @@ body {
 }
 
 .avatar-ai {
-  background: linear-gradient(135deg, #3d6bff, #8b5cf6);
+  background: var(--accent);
   color: #fff;
 }
 
@@ -1154,6 +1156,12 @@ body {
   box-shadow: 0 0 0 3px var(--accent-light);
 }
 
+.form-field input.api-key-input {
+  font-family: 'Segoe UI', Aptos, sans-serif;
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
 .form-hint {
   font-size: 11px;
   color: var(--text-tertiary);
@@ -1436,10 +1444,10 @@ body {
 
 .stat-item {
   padding: 16px;
-  background: linear-gradient(135deg, #5046e5 0%, #667eea 100%);
+  background: var(--accent);
   border-radius: 12px;
   text-align: center;
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+  box-shadow: 0 4px 12px rgba(40, 117, 107, 0.12);
   transition: transform 0.2s;
 }
 
@@ -1471,18 +1479,18 @@ body {
   padding: 12px;
   font-size: 15px;
   font-weight: 600;
-  background: linear-gradient(135deg, #5046e5 0%, #667eea 100%);
+  background: var(--accent);
   border: none;
   color: white;
   border-radius: 10px;
   cursor: pointer;
   transition: all 0.3s;
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+  box-shadow: 0 4px 12px rgba(40, 117, 107, 0.14);
 }
 
 .mcp-add-btn:hover {
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+  box-shadow: 0 6px 20px rgba(40, 117, 107, 0.18);
 }
 
 /* 服务器列表 */
@@ -1517,7 +1525,7 @@ body {
   top: 0;
   bottom: 0;
   width: 4px;
-  background: #5046e5;
+  background: var(--accent);
   transform: scaleY(0);
   transition: transform 0.2s;
 }
@@ -1533,9 +1541,9 @@ body {
 }
 
 .mcp-server-item.active {
-  border-color: #5046e5;
+  border-color: var(--accent);
   background: var(--bg-hover);
-  box-shadow: 0 4px 16px rgba(102, 126, 234, 0.15);
+  box-shadow: 0 4px 16px rgba(40, 117, 107, 0.1);
 }
 
 .mcp-server-item.active::before {
@@ -1602,7 +1610,7 @@ body {
 }
 
 .btn-icon:hover {
-  background: #5046e5;
+  background: var(--accent);
   color: white;
   transform: scale(1.1);
 }
@@ -1647,7 +1655,7 @@ body {
 }
 
 .tool-name {
-  color: #5046e5;
+  color: var(--accent);
   font-weight: 600;
 }
 
@@ -1701,9 +1709,9 @@ body {
 .form-field input:focus,
 .form-field select:focus,
 .form-field textarea:focus {
-  border-color: #5046e5;
+  border-color: var(--accent);
   outline: none;
-  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+  box-shadow: 0 0 0 3px rgba(40, 117, 107, 0.1);
 }
 
 .form-field input:disabled {
@@ -1734,18 +1742,18 @@ body {
   padding: 12px 24px;
   font-size: 15px;
   font-weight: 600;
-  background: linear-gradient(135deg, #5046e5 0%, #667eea 100%);
+  background: var(--accent);
   border: none;
   color: white;
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.3s;
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+  box-shadow: 0 4px 12px rgba(40, 117, 107, 0.14);
 }
 
 .form-actions .btn-primary:hover {
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+  box-shadow: 0 6px 20px rgba(40, 117, 107, 0.18);
 }
 
 .btn-secondary {
@@ -1770,7 +1778,7 @@ body {
 .form-message {
   margin-top: 20px;
   padding: 14px 18px;
-  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  background: var(--success);
   color: white;
   border-radius: 8px;
   font-size: 14px;
@@ -2141,4 +2149,723 @@ body {
   padding: 48px;
   color: var(--text-secondary);
   font-size: 16px;
+}
+
+/* ============ Shared modal and extension polish ============ */
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.modal-overlay {
+  padding: 24px;
+  background: rgba(24, 34, 29, 0.36);
+  backdrop-filter: blur(3px);
+}
+
+.modal {
+  width: min(460px, 100%);
+  max-width: calc(100vw - 32px);
+  max-height: min(85vh, 760px);
+  border: 1px solid rgba(203, 216, 208, 0.9);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.modal-header {
+  min-height: 62px;
+  padding: 16px 20px;
+  background: var(--bg-main);
+}
+
+.modal-header h2 {
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+.modal-close {
+  width: 34px;
+  height: 34px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+}
+
+.modal-close:hover {
+  border-color: var(--border);
+}
+
+.modal-body {
+  min-height: 0;
+  background: var(--bg-main);
+}
+
+.form-field {
+  margin-bottom: 0;
+}
+
+.form-field label,
+.form-group label {
+  display: block;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.form-field input,
+.form-field select,
+.form-field textarea,
+.form-group input,
+.form-group select,
+.form-group textarea {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text);
+}
+
+.form-field textarea,
+.form-group textarea {
+  min-height: 92px;
+  resize: vertical;
+}
+
+.form-field input:focus,
+.form-field select:focus,
+.form-field textarea:focus,
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(40, 117, 107, 0.13);
+}
+
+.form-hint {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.form-section {
+  margin: 0 20px 16px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-tool);
+}
+
+.settings-modal .form-section {
+  margin: 0;
+}
+
+.form-section h3 {
+  margin: 0 0 14px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-group .form-hint {
+  line-height: 1.5;
+}
+
+.form-group a,
+.skill-detail-info a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.form-group a:hover,
+.skill-detail-info a:hover {
+  text-decoration: underline;
+}
+
+.modal-footer,
+.modal-actions {
+  min-height: 64px;
+  padding: 14px 20px;
+  background: var(--bg-main);
+}
+
+.btn {
+  min-height: 38px;
+  border-radius: var(--radius-sm);
+}
+
+.btn-send,
+.form-actions .btn-primary {
+  background: var(--accent);
+  box-shadow: none;
+}
+
+.btn-send:hover:not(:disabled),
+.form-actions .btn-primary:hover {
+  background: var(--accent-hover);
+  box-shadow: none;
+}
+
+.btn-cancel,
+.btn-secondary {
+  background: var(--bg-tool);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.btn-cancel:hover,
+.btn-secondary:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+
+/* Skill management */
+.skills-modal {
+  width: min(860px, 100%);
+  max-width: calc(100vw - 32px);
+}
+
+.skills-layout {
+  min-height: min(560px, calc(85vh - 64px));
+  max-height: calc(85vh - 64px);
+  background: var(--bg-tool);
+}
+
+.skills-manager-list {
+  width: 248px;
+  flex-shrink: 0;
+  padding: 14px;
+  border-right: 1px solid var(--border);
+  background: var(--bg-sidebar);
+  overflow-y: auto;
+}
+
+.skills-new {
+  min-height: 40px;
+  border: 1px dashed var(--border-strong);
+  background: var(--bg-main);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.skills-new:hover {
+  background: var(--accent-light);
+  border-color: var(--accent);
+}
+
+.skills-item {
+  width: 100%;
+  min-height: 58px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+}
+
+.skills-item.active {
+  border-color: #b8d8cf;
+  background: var(--accent-light);
+}
+
+.skills-item-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skills-form {
+  min-width: 0;
+  padding: 22px 24px;
+  background: var(--bg-main);
+}
+
+.skills-content-field {
+  min-height: 220px;
+}
+
+.skills-content {
+  min-height: 220px;
+  resize: none;
+}
+
+.skills-form .modal-actions {
+  margin-top: auto;
+  padding: 12px 0 0;
+  gap: 8px;
+}
+
+.skills-form .modal-actions .btn {
+  min-width: 92px;
+}
+
+/* MCP configuration */
+.mcp-modal {
+  width: min(1040px, 100%);
+  max-width: calc(100vw - 32px);
+  max-height: min(86vh, 780px);
+  box-shadow: var(--shadow-md);
+}
+
+.mcp-body {
+  min-height: 0;
+  padding: 20px;
+  gap: 20px;
+  background: var(--bg-tool);
+}
+
+.mcp-sidebar {
+  width: 292px;
+  padding: 0 20px 0 0;
+  border-right: 1px solid var(--border);
+  gap: 14px;
+}
+
+.mcp-stats {
+  gap: 8px;
+}
+
+.stat-item {
+  padding: 12px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-main);
+  box-shadow: none;
+  text-align: left;
+}
+
+.stat-item:hover {
+  transform: none;
+}
+
+.stat-label {
+  margin-bottom: 3px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.stat-value {
+  color: var(--text);
+  font-size: 22px;
+  text-shadow: none;
+}
+
+.mcp-add-btn {
+  min-height: 42px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  box-shadow: none;
+}
+
+.mcp-add-btn:hover {
+  background: var(--accent-hover);
+  box-shadow: none;
+  transform: none;
+}
+
+.mcp-server-list {
+  min-height: 72px;
+  gap: 6px;
+  padding-right: 2px;
+}
+
+.mcp-server-item {
+  min-height: 62px;
+  padding: 10px 10px 10px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: var(--bg-main);
+}
+
+.mcp-server-item::before {
+  width: 3px;
+  background: var(--accent);
+}
+
+.mcp-server-item:hover {
+  background: var(--bg-main);
+  border-color: var(--border-strong);
+  box-shadow: none;
+  transform: none;
+}
+
+.mcp-server-item.active {
+  border-color: #b8d8cf;
+  background: var(--accent-light);
+  box-shadow: none;
+}
+
+.server-name {
+  font-size: 13px;
+}
+
+.server-type {
+  background: var(--bg-tertiary);
+  color: var(--text-tertiary);
+  font-size: 10px;
+}
+
+.server-actions {
+  gap: 4px;
+}
+
+.mcp-sidebar .btn-icon {
+  background: var(--bg-tool);
+}
+
+.mcp-sidebar .btn-icon:hover {
+  background: var(--accent-light);
+  color: var(--accent);
+  transform: none;
+}
+
+.mcp-tools-section {
+  padding-top: 14px;
+}
+
+.mcp-tools-section h3 {
+  margin-bottom: 8px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.mcp-tools-list {
+  max-height: 148px;
+}
+
+.mcp-tool-item {
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  background: var(--bg-main);
+  border-radius: var(--radius-sm);
+}
+
+.mcp-tool-item:hover {
+  background: var(--bg-hover);
+  transform: none;
+}
+
+.tool-name {
+  color: var(--accent);
+}
+
+.mcp-editor {
+  min-width: 0;
+  padding: 2px 4px 2px 0;
+}
+
+.mcp-editor .form-field {
+  margin-bottom: 16px;
+}
+
+.mcp-editor .form-field label {
+  margin-bottom: 6px;
+}
+
+.mcp-editor .form-actions {
+  margin-top: 22px;
+  padding-top: 16px;
+}
+
+.mcp-editor .form-actions .btn-primary,
+.mcp-editor .btn-secondary {
+  min-height: 40px;
+}
+
+.form-message {
+  padding: 10px 12px;
+  border: 1px solid #b8d8cf;
+  background: var(--accent-light);
+  color: var(--accent-hover);
+  box-shadow: none;
+}
+
+/* Skill discovery */
+.skill-discovery-modal {
+  width: min(1060px, 100%);
+  max-width: calc(100vw - 32px);
+  height: min(760px, 86vh);
+  max-height: 86vh;
+}
+
+.skill-discovery {
+  min-height: 0;
+}
+
+.skill-discovery-header {
+  padding: 22px 24px 16px;
+  border-bottom: 0;
+}
+
+.skill-discovery-header h2 {
+  margin-bottom: 4px;
+  font-size: 21px;
+}
+
+.skill-discovery-header .subtitle {
+  font-size: 13px;
+}
+
+.search-section {
+  margin: 0 24px 16px;
+  padding: 0 0 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.search-bar {
+  margin-bottom: 12px;
+}
+
+.search-bar input {
+  min-height: 42px;
+  background: var(--bg-input);
+  border-color: var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+
+.search-bar button {
+  min-width: 86px;
+  min-height: 42px;
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+}
+
+.filter-tabs {
+  gap: 6px;
+}
+
+.filter-tabs button {
+  min-height: 34px;
+  padding: 7px 12px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.filter-tabs button.active {
+  background: var(--accent-light);
+  border-color: #b8d8cf;
+  color: var(--accent-hover);
+}
+
+.error-message {
+  margin: 0 24px 12px;
+  padding: 10px 12px;
+  border: 1px solid #e8c2c3;
+  border-radius: var(--radius-sm);
+  background: #fff7f7;
+  color: var(--danger);
+}
+
+.skill-discovery-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 24px 24px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  align-content: start;
+}
+
+.skill-card {
+  min-width: 0;
+  min-height: 170px;
+  padding: 15px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-main);
+  box-shadow: none;
+}
+
+.skill-card:hover {
+  border-color: #9cc8bc;
+  background: #fbfefc;
+  box-shadow: 0 8px 18px rgba(25, 49, 39, 0.08);
+  transform: translateY(-1px);
+}
+
+.skill-source,
+.topic-tag {
+  background: var(--bg-tool);
+  color: var(--text-secondary);
+}
+
+.skill-source {
+  border: 1px solid var(--border);
+}
+
+.skill-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-description {
+  min-height: 42px;
+}
+
+.modal-content.skill-detail-modal {
+  width: min(720px, 100%);
+  max-width: calc(100vw - 32px);
+  max-height: min(82vh, 720px);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-main);
+  box-shadow: var(--shadow-md);
+}
+
+.skill-detail-modal .modal-body {
+  max-height: calc(min(82vh, 720px) - 64px);
+}
+
+.skill-detail-info {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-tool);
+}
+
+.skill-detail-info p:last-child {
+  margin-bottom: 0;
+}
+
+.skill-readme h3 {
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.readme-content {
+  max-height: 300px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #f7faf8;
+}
+
+.install-actions {
+  padding-top: 18px;
+}
+
+.security-warning {
+  padding: 10px 12px;
+  border: 1px solid #ecd9ae;
+  border-radius: var(--radius-sm);
+  background: #fffaf0;
+  color: #805b1b;
+}
+
+.install-button {
+  min-height: 40px;
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+}
+
+.install-button.secondary {
+  border: 1px solid var(--border);
+  background: var(--bg-tool);
+}
+
+.not-installable {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+@media (max-width: 760px) {
+  .modal-overlay {
+    align-items: flex-end;
+    padding: 12px;
+  }
+
+  .modal,
+  .skills-modal,
+  .mcp-modal,
+  .skill-discovery-modal,
+  .modal-content.skill-detail-modal {
+    max-width: 100%;
+    max-height: calc(100vh - 24px);
+    border-radius: var(--radius-lg) var(--radius-lg) 8px 8px;
+  }
+
+  .skills-layout {
+    flex-direction: column;
+    max-height: calc(100vh - 88px);
+  }
+
+  .skills-manager-list {
+    width: 100%;
+    max-height: 190px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .skills-form {
+    padding: 18px;
+    overflow-y: auto;
+  }
+
+  .mcp-body {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .mcp-sidebar {
+    width: 100%;
+    padding: 0 0 16px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .mcp-editor {
+    overflow: visible;
+    padding: 2px 0;
+  }
+
+  .search-bar {
+    flex-direction: column;
+  }
+
+  .search-bar button {
+    width: 100%;
+  }
+
+  .skill-discovery-list {
+    grid-template-columns: 1fr;
+  }
+
+  .install-buttons {
+    flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }

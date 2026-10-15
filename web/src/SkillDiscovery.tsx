@@ -143,7 +143,7 @@ export function SkillDiscovery({ client, hasWorkspace }: SkillDiscoveryProps) {
       )}
 
       {/* 技能列表 */}
-      <div className="skills-list">
+      <div className="skill-discovery-list">
         {skills.map((skill) => (
           <div key={skill.id} className="skill-card" onClick={() => handleViewDetail(skill)}>
             <div className="skill-card-header">
@@ -173,7 +173,7 @@ export function SkillDiscovery({ client, hasWorkspace }: SkillDiscoveryProps) {
       {/* 技能详情弹窗 */}
       {selectedSkill && (
         <div className="modal-overlay" onClick={() => setSelectedSkill(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content skill-detail-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>
                 {selectedSkill.source === 'official' ? '📦' : '🌐'} {selectedSkill.name}

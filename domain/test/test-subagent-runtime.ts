@@ -5,7 +5,7 @@
  * spawn/wait、上下文隔离、工具白名单、并发限制、递归深度、超时、取消
  */
 
-import { SubagentRuntime } from '../src/subagent';
+import { MemoryStorage, SubagentRuntime } from '../src';
 import type { AgentConfig, Tool } from '../src/types';
 
 let passed = 0;
@@ -74,6 +74,7 @@ class FakeAgent {
 
 function makeRuntime(opts: { delay?: number; maxConcurrency?: number; maxDepth?: number; defaultTimeout?: number } = {}) {
   const created: FakeAgent[] = [];
+  const storage = new MemoryStorage();
   const runtime = new SubagentRuntime({
     agentFactory: (cfg) => {
       const a = new FakeAgent(cfg, opts.delay ?? 20);
@@ -84,17 +85,20 @@ function makeRuntime(opts: { delay?: number; maxConcurrency?: number; maxDepth?:
       llm: { provider: 'openai', apiKey: 'k', model: 'm' },
       tools: baseTools,
       permissionMode: 'trust',
+      storage,
+      taskStore: storage.getTaskStore(),
     },
+    taskStore: storage.getTaskStore(),
     maxConcurrency: opts.maxConcurrency,
     maxDepth: opts.maxDepth,
     defaultTimeout: opts.defaultTimeout,
   });
-  return { runtime, created };
+  return { runtime, created, storage };
 }
 
 async function testSpawnWait() {
   console.log('\n[1] spawn + wait 基本流程');
-  const { runtime, created } = makeRuntime();
+  const { runtime, created, storage } = makeRuntime();
   const { runId } = await runtime.spawn({ parentRunId: 'root', task: 'hello' });
   const result = await runtime.wait(runId);
   assert(result.status === 'completed', `状态 completed（实际 ${result.status}，error=${result.error ?? ''}）`);
@@ -106,7 +110,7 @@ async function testSpawnWait() {
 
 async function testContextIsolation() {
   console.log('\n[2] 上下文隔离 / system prompt');
-  const { runtime, created } = makeRuntime();
+  const { runtime, created, storage } = makeRuntime();
   const { runId } = await runtime.spawn({
     parentRunId: 'root',
     task: 'analyze',
@@ -117,8 +121,41 @@ async function testContextIsolation() {
   const cfg = created[0].config;
   assert(!!cfg.systemPrompt?.includes('代码审查员'), 'system prompt 含角色');
   assert(!!cfg.systemPrompt?.includes('SUMMARY-XYZ'), 'system prompt 含上下文摘要');
-  assert(cfg.storage === undefined, '子 Agent 不写父会话存储');
+  assert(cfg.storage !== undefined, '子 Agent 使用独立 session 持久化存储');
   assert(cfg.sessionId === runId, '子 Agent sessionId = runId（用于递归深度追溯）');
+  const stored = await storage.getTaskStore().getTask(runId);
+  assert(stored?.status === 'completed', '子 Agent TaskRecord 在结束时持久化');
+  assert(stored?.sessionId === runId, '子 Agent 使用独立持久化 session');
+}
+
+async function testRestartAndWait() {
+  const { runtime, created, storage } = makeRuntime();
+  const request = {
+    parentRunId: 'root',
+    task: 'persist delegation',
+    role: 'reviewer',
+    context: { summary: 'review context', files: ['a.ts'] },
+    tools: ['bash'],
+    config: { maxIterations: 7, permissionMode: 'ask' as const },
+  };
+  const { runId } = await runtime.spawn(request);
+  await runtime.wait(runId);
+  const restarted = new SubagentRuntime({
+    agentFactory: cfg => new FakeAgent(cfg, 10) as any,
+    parentConfig: {
+      llm: { provider: 'openai', apiKey: 'k', model: 'm' },
+      tools: baseTools,
+      storage,
+      taskStore: storage.getTaskStore(),
+    },
+  });
+  const result = await restarted.wait(runId, 10);
+  assert(result.status === 'completed' && result.output === 'done: persist delegation',
+    '新 runtime 可读取已持久化的结果');
+  const stored = await storage.getTaskStore().getTask(runId);
+  assert(JSON.stringify(stored?.delegation) === JSON.stringify(request),
+    '完整委派请求写入 TaskStore');
+  assert(created[0].config.maxIterations === 7, '原始配置已生效');
 }
 
 async function testToolWhitelist() {
@@ -162,7 +199,7 @@ async function testConcurrencyLimit() {
 
 async function testDepthLimit() {
   console.log('\n[5] 递归深度');
-  const { runtime } = makeRuntime({ delay: 200, maxDepth: 2 });
+  const { runtime, storage } = makeRuntime({ delay: 200, maxDepth: 2 });
   const l1 = await runtime.spawn({ parentRunId: 'root', task: 'l1' });
   // 子 Agent 以自己的 sessionId(=runId) 作为 parentRunId 发起下一层
   const l2 = await runtime.spawn({ parentRunId: l1.runId, task: 'l2' });
@@ -175,6 +212,8 @@ async function testDepthLimit() {
   assert(err.includes('depth'), `第 3 层被拒（maxDepth=2）：${err || '未抛错'}`);
   await runtime.wait(l1.runId);
   await runtime.wait(l2.runId);
+  const l2Task = await storage.getTaskStore().getTask(l2.runId);
+  assert(l2Task?.parentId === l1.runId, '子 Agent TaskRecord 保存父子关系');
 }
 
 async function testFailure() {
@@ -187,21 +226,22 @@ async function testFailure() {
 
 async function testTimeout() {
   console.log('\n[7] 超时');
-  const { runtime } = makeRuntime({ delay: 5000 });
+  const { runtime } = makeRuntime({ delay: 120 });
   const { runId } = await runtime.spawn({ parentRunId: 'root', task: 'slow' });
   const t0 = Date.now();
-  const result = await runtime.wait(runId, 100);
+  const result = await runtime.wait(runId, 10);
   assert(result.status === 'timeout', `状态 timeout（实际 ${result.status}）`);
   assert(Date.now() - t0 < 1000, '超时及时返回');
   const status = await runtime.getStatus(runId);
-  assert(status.status === 'timeout', `超时后状态不被覆盖（实际 ${status.status}）`);
+  assert(status.status === 'running', `观察超时不改变真实任务状态（实际 ${status.status}）`);
+  const completed = await runtime.wait(runId, 1000);
+  assert(completed.status === 'completed', '观察超时后子 Agent 仍可正常完成');
 }
 
 async function testCancel() {
   console.log('\n[8] 取消');
   const { runtime } = makeRuntime({ delay: 5000 });
   const { runId } = await runtime.spawn({ parentRunId: 'root', task: 'long' });
-  await new Promise(r => setTimeout(r, 20));
   await runtime.cancel(runId);
   const result = await runtime.wait(runId, 1000);
   assert(result.status === 'cancelled', `wait 返回 cancelled（实际 ${result.status}）`);
@@ -213,7 +253,7 @@ async function main() {
   console.log('SubagentRuntime 单元测试');
   const t0 = Date.now();
   const tests = [testSpawnWait, testContextIsolation, testToolWhitelist, testConcurrencyLimit,
-    testDepthLimit, testFailure, testTimeout, testCancel];
+    testDepthLimit, testFailure, testTimeout, testCancel, testRestartAndWait];
   for (const t of tests) {
     try {
       await t();

@@ -4,8 +4,24 @@
  * 支持多会话（每个会话一个 PlainAgent 实例），SQLite 持久化
  */
 
-import { PlainAgent, SQLiteStorage, getBuiltinTools, loadMcpTools, loadProjectMcp, applyProxyConfig } from '@plain-agent/domain';
-import type { AgentEvent, ChatMessage, LLMConfig, Session, Tool, McpServerConfig } from '@plain-agent/domain';
+import {
+  PlainAgent,
+  SQLiteStorage,
+  TaskOrchestrator,
+  getBuiltinTools,
+  loadMcpTools,
+  loadProjectMcp,
+  applyProxyConfig,
+} from '@plain-agent/domain';
+import type {
+  AgentEvent,
+  ChatMessage,
+  LLMConfig,
+  Session,
+  TaskStore,
+  Tool,
+  McpServerConfig,
+} from '@plain-agent/domain';
 import { createSkillDiscovery, installRemoteSkill } from '@plain-agent/domain';
 import type { RemoteSkill, RemoteSkillDetail, SkillInstallOptions } from '@plain-agent/domain';
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
@@ -64,6 +80,8 @@ function buildLLMConfigFromSettings(settings: AppSettings): LLMConfig {
 
 export class AgentService {
   private storage: SQLiteStorage;
+  private taskStore: TaskStore;
+  private taskOrchestrator: TaskOrchestrator;
   private settingsStore: SettingsStore;
   private settings: AppSettings;
   private agents = new Map<string, PlainAgent>();
@@ -87,13 +105,24 @@ export class AgentService {
     mkdirSync(this.userDataDir, { recursive: true });
     const dbPath = join(this.userDataDir, 'plain-agent.db');
     this.storage = new SQLiteStorage(dbPath);
+    this.taskStore = this.storage.getTaskStore();
 
     // 加载用户配置（settings.json > .env > 默认值）
     this.settingsStore = new SettingsStore(this.userDataDir);
     this.settings = this.settingsStore.load();
 
     // 加载 MCP 工具
-    void this.loadMcp();
+    this.taskOrchestrator = new TaskOrchestrator({
+      taskStore: this.taskStore,
+      sessionStorage: this.storage,
+      workerId: `desktop-${process.pid}`,
+      createAgent: (sessionId) => this.createAgent(sessionId),
+      prepareAgent: (agent) => agent.loadHistory().then(() => undefined),
+    });
+
+    void this.loadMcp().then(() => this.taskOrchestrator.recover()).catch((error) => {
+      console.error('Failed to recover persisted tasks:', error);
+    });
   }
 
   /**
@@ -163,6 +192,7 @@ export class AgentService {
         maxDepth: 2,
       },
       storage: this.storage,
+      taskStore: this.taskStore,
       sessionId,
       permissionMode: this.settings.permissionMode,
       maxIterations: 150,
@@ -256,6 +286,7 @@ export class AgentService {
 
   /** 删除会话 */
   async deleteSession(sessionId: string): Promise<void> {
+    await this.taskOrchestrator.cancelSession(sessionId);
     // 删除存储中的数据
     await this.storage.deleteSession(sessionId);
 
@@ -284,7 +315,7 @@ export class AgentService {
     const agent = this.getCurrentAgent();
     // 首次对话后用第一个问题自动命名会话（fire-and-forget）
     this.maybeAutoRenameSession(agent.getSessionId(), task);
-    return agent.submit(task, taskId);
+    return this.taskOrchestrator.run(agent.getSessionId(), task, taskId, agent);
   }
 
   /**
@@ -309,7 +340,15 @@ export class AgentService {
 
   /** 停止任务 */
   stop(taskId?: string): void {
-    this.getCurrentAgent().stop(taskId);
+    const agent = this.getCurrentAgent();
+    const taskIds = taskId ? [taskId] : agent.getRunningTasks();
+    if (taskIds.length === 0) {
+      agent.stop(taskId);
+      return;
+    }
+    for (const activeTaskId of taskIds) {
+      void this.taskOrchestrator.cancel(activeTaskId);
+    }
   }
 
   /** 获取运行中的任务 ID */
@@ -514,7 +553,11 @@ export class AgentService {
 
   /** 销毁服务 */
   destroy(): void {
-    this.agents.forEach(agent => agent.destroy());
+    this.taskOrchestrator.shutdown();
+    this.agents.forEach(agent => {
+      // Keep active work persisted so its lease can expire and be recovered.
+      if (agent.getRunningTasks().length === 0) agent.destroy();
+    });
     this.agents.clear();
     this.onEventListeners.clear();
 

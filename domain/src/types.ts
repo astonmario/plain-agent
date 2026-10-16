@@ -3,6 +3,8 @@
  * 完全独立于运行环境，不依赖 Electron、HTTP 等
  */
 
+import type { TaskStore } from './tasks/store';
+
 // ============ LLM 相关类型 ============
 
 export interface ChatMessage {
@@ -110,6 +112,8 @@ export interface ToolMeta {
 export interface ToolContext {
   signal: AbortSignal;
   sessionId: string;
+  /** Current persisted task ID, used to link child tasks. */
+  taskId?: string;
   emitEvent: (event: AgentEvent) => void;
   storage?: SessionStorage;
   permissionCheck?: (tool: Tool, args: any) => Promise<boolean>;
@@ -198,6 +202,8 @@ export interface AgentConfig {
     defaultTimeout?: number;
     maxDepth?: number;
   };
+  /** Persistent task store shared with SubagentRuntime. */
+  taskStore?: TaskStore;
   /**
    * 复用已有的子 Agent 运行时（内部用：子 Agent 共享父级 runtime，
    * 使并发与递归深度全局统一计算）。优先于 enableSubagents。

@@ -11,8 +11,16 @@
 
 import React from 'react';
 import { render } from 'ink';
-import { PlainAgent, SQLiteStorage, MemoryStorage, getBuiltinTools, loadMcpTools, loadProjectMcp } from '@plain-agent/domain';
-import type { SessionStorage, PermissionMode, Tool } from '@plain-agent/domain';
+import {
+  PlainAgent,
+  SQLiteStorage,
+  MemoryStorage,
+  TaskOrchestrator,
+  getBuiltinTools,
+  loadMcpTools,
+  loadProjectMcp,
+} from '@plain-agent/domain';
+import type { SessionStorage, PermissionMode, Tool, TaskStore } from '@plain-agent/domain';
 import { readFileSync, existsSync, mkdirSync } from 'fs';
 import { resolve, join } from 'path';
 import { homedir } from 'os';
@@ -66,16 +74,19 @@ if (!process.env.API_KEY) {
 // 优先 SQLite 持久化（Node 22+），Node 20 回退内存会话
 // 会话按项目隔离：每个 cwd 一个独立 DB（借鉴 any-code 的 projectKey 语义），
 // /resume、--sessions、--continue 都只看到自己项目的会话
-let storage: SessionStorage;
+let storage: SQLiteStorage | MemoryStorage;
+let taskStore: TaskStore;
 let persisted = false;
 const projectKey = process.cwd().replace(/[/\\:]/g, '-');
 try {
   const dir = join(homedir(), '.plain-agent', 'projects');
   mkdirSync(dir, { recursive: true });
   storage = new SQLiteStorage(join(dir, `${projectKey}.db`));
+  taskStore = storage.getTaskStore();
   persisted = true;
 } catch {
   storage = new MemoryStorage();
+  taskStore = storage.getTaskStore();
 }
 
 // 加载 MCP 工具（启动时加载，所有 agent 实例共享）
@@ -126,6 +137,7 @@ function createAgent(sessionId?: string): PlainAgent {
       maxDepth: 2,
     },
     storage,
+    taskStore,
     sessionId,
     systemPrompt: TUI_SYSTEM_PROMPT,
     permissionMode: (process.env.PERMISSION_MODE as PermissionMode) || 'trust',
@@ -140,6 +152,14 @@ function createAgent(sessionId?: string): PlainAgent {
     },
   });
 }
+
+const taskOrchestrator = new TaskOrchestrator({
+  taskStore,
+  sessionStorage: storage,
+  workerId: `cli-${process.pid}`,
+  createAgent: (sessionId) => createAgent(sessionId),
+  prepareAgent: (agent) => agent.loadHistory().then(() => undefined),
+});
 
 // ---- 启动参数 ----
 const argv = process.argv.slice(2);
@@ -177,6 +197,10 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  void taskOrchestrator.recover().catch((error) => {
+    console.error('Failed to recover persisted tasks:', error);
+  });
+
   let sessionId: string | undefined;
   const resumeId = flagValue('resume');
   const isContinue = argv.includes('--continue');
@@ -202,6 +226,19 @@ async function main(): Promise<void> {
     inkInstance = render(
       <App
         createAgent={createAgent}
+        submitTask={(agent, task) =>
+          taskOrchestrator.run(agent.getSessionId(), task, undefined, agent)
+        }
+        stopTask={(agent) => {
+          const activeIds = agent.getRunningTasks();
+          if (activeIds.length === 0) {
+            agent.stop();
+            return;
+          }
+          for (const taskId of activeIds) {
+            void taskOrchestrator.cancel(taskId);
+          }
+        }}
         storage={storage}
         info={info}
         sessionId={sid}

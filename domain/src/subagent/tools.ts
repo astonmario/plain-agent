@@ -90,7 +90,7 @@ export function createSpawnSubagentTool(): Tool {
 
       try {
         const { runId } = await runtime.spawn({
-          parentRunId: ctx.sessionId, // 使用 sessionId 作为父任务 ID
+          parentRunId: ctx.taskId ?? ctx.sessionId,
           task: args.task,
           role: args.role,
           context: {

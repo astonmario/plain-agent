@@ -146,6 +146,7 @@ export class PlainAgent extends EventEmitter {
       this.subagentRuntime = new SubagentRuntime({
         agentFactory: (agentConfig: AgentConfig) => new PlainAgent(agentConfig),
         parentConfig: { ...config, tools: baseTools },
+        taskStore: config.taskStore,
         maxConcurrency: config.subagentConfig?.maxConcurrency,
         defaultTimeout: config.subagentConfig?.defaultTimeout,
         maxDepth: config.subagentConfig?.maxDepth,
@@ -344,6 +345,7 @@ export class PlainAgent extends EventEmitter {
     const ctx: ToolContext = {
       signal: abortController.signal, // 用于取消任务执行
       sessionId: this.sessionId,
+      taskId: id,
       emitEvent: (event: AgentEvent) => this.emitEvent(event), // 事件发射器
       storage: this.storage || undefined,
       permissionCheck: async (tool, args) => {

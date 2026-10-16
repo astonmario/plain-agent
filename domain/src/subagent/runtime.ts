@@ -1,17 +1,10 @@
-/**
- * Subagent Runtime 实现
- *
- * 职责：
- * - 创建和管理子 Agent 实例
- * - 独立状态隔离：子 Agent 有自己的会话与历史，不写父会话存储
- * - 生命周期控制（spawn/wait/cancel），终态只写一次（先到先得）
- * - 并发与递归深度限制
- */
-
 import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
 import type { PlainAgent } from '../agent';
-import type { AgentConfig, AgentEvent, Tool, ChatMessage } from '../types';
+import type { AgentConfig, AgentEvent, ChatMessage, Tool } from '../types';
+import { MemoryTaskStore } from '../tasks/memory';
+import type { TaskStore } from '../tasks/store';
+import type { TaskRecord } from '../tasks/types';
 import type {
   SubagentRequest,
   SubagentResult,
@@ -19,225 +12,264 @@ import type {
   SubagentRun,
   SubagentRuntime as ISubagentRuntime,
   ToolPolicy,
-  TaskStore,
 } from './types';
 
 type SubagentEventName = 'progress' | 'tool_call' | 'completed' | 'error';
+type RuntimeConfig = Required<SubagentRuntimeConfig>;
 
 export interface SubagentRuntimeConfig {
-  /** Agent 工厂函数（用于创建子 Agent 实例） */
   agentFactory: (config: AgentConfig) => PlainAgent;
-
-  /** 父 Agent 配置（复用 LLM 等）；tools 应为父 Agent 的基础工具，不含其自动追加的会话绑定工具 */
   parentConfig: AgentConfig;
-
-  /** 可选的工具策略 */
   toolPolicy?: ToolPolicy;
-
-  /** 可选的任务存储 */
   taskStore?: TaskStore;
-
-  /** 最大并发子任务数（默认 5） */
   maxConcurrency?: number;
-
-  /** 默认超时时间（毫秒，默认 5 分钟） */
   defaultTimeout?: number;
-
-  /** 最大递归深度（默认 3） */
   maxDepth?: number;
 }
 
-const TERMINAL: ReadonlySet<SubagentStatus['status']> = new Set(['completed', 'failed', 'cancelled', 'timeout']);
+const TERMINAL: ReadonlySet<SubagentStatus['status']> = new Set([
+  'completed',
+  'failed',
+  'cancelled',
+]);
 
-/** 摘要截断长度（回注父 Agent 用） */
 const SUMMARY_MAX_LENGTH = 500;
 
 export class SubagentRuntime extends EventEmitter implements ISubagentRuntime {
-  private config: Required<SubagentRuntimeConfig>;
-  private runs = new Map<string, SubagentRun>();
-  private eventListeners = new Map<string, Map<SubagentEventName, Set<(data: any) => void>>>();
+  private readonly config: RuntimeConfig;
+  private readonly runs = new Map<string, SubagentRun>();
+  private readonly eventListeners = new Map<
+    string,
+    Map<SubagentEventName, Set<(data: any) => void>>
+  >();
+  private pendingSpawns = 0;
 
   constructor(config: SubagentRuntimeConfig) {
     super();
-
+    const taskStore = config.taskStore ?? config.parentConfig.taskStore ?? new MemoryTaskStore();
     this.config = {
       agentFactory: config.agentFactory,
-      parentConfig: config.parentConfig,
-      toolPolicy: config.toolPolicy || new DefaultToolPolicy(),
-      taskStore: config.taskStore || new MemoryTaskStore(),
+      parentConfig: { ...config.parentConfig, taskStore },
+      toolPolicy: config.toolPolicy ?? new DefaultToolPolicy(),
+      taskStore,
       maxConcurrency: config.maxConcurrency ?? 5,
-      defaultTimeout: config.defaultTimeout ?? 300000, // 5分钟
+      defaultTimeout: config.defaultTimeout ?? 300_000,
       maxDepth: config.maxDepth ?? 3,
     };
   }
 
-  /**
-   * 创建并启动子 Agent
-   *
-   * 校验与登记在同一同步段内完成（中间无 await），并发 spawn 不会越过上限。
-   */
   async spawn(request: SubagentRequest): Promise<{ runId: string }> {
-    // 父任务若是某个子 Agent（其 sessionId = runId），深度 = 父深度 + 1；否则为顶层
-    const parent = this.runs.get(request.parentRunId);
-    const depth = parent ? parent.depth + 1 : 0;
+    const activeCount = [...this.runs.values()].filter(run => !TERMINAL.has(run.status)).length;
+    if (activeCount + this.pendingSpawns >= this.config.maxConcurrency) {
+      throw new Error(
+        `Maximum concurrent subagents (${this.config.maxConcurrency}) reached. ` +
+        `Please wait for some tasks to complete.`,
+      );
+    }
+    this.pendingSpawns++;
+    let reservationHeld = true;
+    const releaseReservation = () => {
+      if (!reservationHeld) return;
+      reservationHeld = false;
+      this.pendingSpawns--;
+    };
+
+    try {
+    const parentRun = this.runs.get(request.parentRunId);
+    const parentTask = await this.config.taskStore.getTask(request.parentRunId);
+    const depth = parentRun ? parentRun.depth + 1 : 0;
     if (depth >= this.config.maxDepth) {
       throw new Error(
         `Maximum recursion depth (${this.config.maxDepth}) exceeded. ` +
-        `Current depth: ${depth}. Consider refactoring the task.`
-      );
-    }
-
-    const activeCount = Array.from(this.runs.values()).filter(r => !TERMINAL.has(r.status)).length;
-    if (activeCount >= this.config.maxConcurrency) {
-      throw new Error(
-        `Maximum concurrent subagents (${this.config.maxConcurrency}) reached. ` +
-        `Please wait for some tasks to complete.`
+        `Current depth: ${depth}. Consider refactoring the task.`,
       );
     }
 
     const runId = randomUUID();
-    const tools = this.config.toolPolicy.filterTools(this.config.parentConfig.tools, request.tools);
-
-    const agentConfig: AgentConfig = {
-      llm: this.config.parentConfig.llm,
-      tools,
-      maxIterations: request.config?.maxIterations || 50,
-      // sessionId = runId：子 Agent 再 spawn 时以此作为 parentRunId，深度可追溯
+    const task: TaskRecord = {
+      id: runId,
+      parentId: parentTask?.id,
+      rootId: parentTask?.rootId ?? runId,
       sessionId: runId,
-      // 不写父会话存储，避免在会话列表里产生孤立会话
-      storage: undefined,
-      // 不允许高于父 Agent 的权限
-      permissionMode: request.config?.permissionMode ?? this.config.parentConfig.permissionMode,
-      historyManagement: this.config.parentConfig.historyManagement,
-      systemPrompt: this.buildSystemPrompt(request),
-      // 下一层仍在深度限制内时共享本 runtime（并发/深度全局统一计算）
-      subagentRuntime: depth + 1 < this.config.maxDepth ? this : undefined,
-    };
-
-    let resolveDone!: (r: SubagentResult) => void;
-    const promise = new Promise<SubagentResult>((resolve) => { resolveDone = resolve; });
-
-    const run: SubagentRun = {
-      runId,
-      request,
-      status: 'pending',
-      agent: undefined,
-      promise,
-      resolveDone,
-      createdAt: Date.now(),
+      prompt: request.task,
+      status: 'queued',
+      attempt: 0,
+      maxAttempts: 2,
+      delegation: request,
       depth,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
     };
-    this.runs.set(runId, run);
+    await this.config.parentConfig.storage?.createSession(runId, 'Subtask');
+    await this.config.taskStore.createTask(task);
 
+    const run = this.makeRun(runId, request, depth);
+    this.runs.set(runId, run);
+    releaseReservation();
     try {
-      run.agent = this.config.agentFactory(agentConfig);
+      run.agent = this.createAgent(request, runId, depth);
     } catch (error: any) {
-      this.finish(run, { status: 'failed', error: `Failed to create subagent: ${error.message}` });
+      await this.markStoredTaskFailed(runId, error?.message ?? String(error));
+      this.finish(run, { status: 'failed', error: error?.message ?? String(error) });
       return { runId };
     }
 
-    run.agent.on('event', (event: AgentEvent) => {
-      this.emitSubagentEvent(runId, event.type === 'tool_start' ? 'tool_call' : 'progress', event);
-    });
-
-    this.config.taskStore.saveTask({
+    this.emit('subagent-created', {
       runId,
-      parentRunId: request.parentRunId,
-      request,
-      status: 'pending',
-      createdAt: run.createdAt,
-    }).catch(err => console.error('Failed to save subagent task:', err));
-
-    this.emit('subagent-created', { runId, request, depth });
-
-    void this.execute(run);
-
-    return { runId };
-  }
-
-  /**
-   * 等待子 Agent 完成；超时则终止子 Agent 并返回 timeout 结果
-   */
-  async wait(runId: string, timeout?: number): Promise<SubagentResult> {
-    const run = this.getRun(runId);
-    if (run.result) return run.result;
-
-    const effectiveTimeout = timeout || this.config.defaultTimeout;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeoutPromise = new Promise<'timeout'>((resolve) => {
-      timer = setTimeout(() => resolve('timeout'), effectiveTimeout);
+      task: request.task,
+      depth,
+      parentId: task.parentId,
     });
-
-    try {
-      const outcome = await Promise.race([run.promise, timeoutPromise]);
-      if (outcome !== 'timeout') return outcome;
-
-      run.agent?.stop();
-      return this.finish(run, {
-        status: 'timeout',
-        error: `Subagent ${runId} timeout after ${effectiveTimeout}ms`,
-      });
-    } finally {
-      clearTimeout(timer);
+    void this.execute(run);
+    return { runId };
+    } catch (error) {
+      releaseReservation();
+      throw error;
     }
   }
 
   /**
-   * 取消子 Agent 执行（已结束则无操作）
+   * Recreate in-memory runs for persisted unfinished child tasks.
+   * The task ID is retained so parent links and event history remain stable.
    */
-  async cancel(runId: string): Promise<void> {
-    const run = this.getRun(runId);
-    if (TERMINAL.has(run.status)) return;
-
-    run.agent?.stop();
-    this.finish(run, { status: 'cancelled' });
-    this.emit('subagent-cancelled', { runId });
+  async recoverPending(parentRunId: string): Promise<string[]> {
+    await this.config.taskStore.recoverExpiredTasks();
+    const tasks = await this.config.taskStore.listTasks({
+      parentId: parentRunId,
+      status: 'queued',
+    });
+    const resumed: string[] = [];
+    for (const task of tasks) {
+      if (this.runs.has(task.id)) continue;
+      const request: SubagentRequest = {
+        parentRunId: task.parentId ?? task.rootId,
+        task: task.prompt,
+      };
+      const run = this.makeRun(task.id, request, 0);
+      this.runs.set(task.id, run);
+      try {
+        run.agent = this.createAgent(request, task.sessionId, 0);
+        void this.execute(run);
+        resumed.push(task.id);
+      } catch (error: any) {
+        await this.markStoredTaskFailed(task.id, error?.message ?? String(error));
+        this.finish(run, { status: 'failed', error: error?.message ?? String(error) });
+      }
+    }
+    return resumed;
   }
 
-  /**
-   * 获取子 Agent 状态
-   */
-  async getStatus(runId: string): Promise<SubagentStatus> {
+  async wait(runId: string, timeout?: number): Promise<SubagentResult> {
     const run = this.runs.get(runId);
-    if (!run) {
-      const stored = await this.config.taskStore.getTask(runId);
-      if (stored) return stored;
-      throw new Error(`Subagent ${runId} not found`);
+    if (run) {
+      if (run.result) return run.result;
+
+      const effectiveTimeout = timeout ?? this.config.defaultTimeout;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeoutPromise = new Promise<'timeout'>(resolve => {
+        timer = setTimeout(() => resolve('timeout'), effectiveTimeout);
+      });
+      const maybeUnref = timer as ReturnType<typeof setTimeout> & { unref?: () => void };
+      maybeUnref?.unref?.();
+
+      try {
+        const outcome = await Promise.race([run.promise, timeoutPromise]);
+        if (outcome !== 'timeout') return outcome;
+
+        // A timeout is an observation result only. The task keeps its lease and runs.
+        return {
+          runId,
+          status: 'timeout',
+          error: `Subagent ${runId} wait timed out after ${effectiveTimeout}ms`,
+        };
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
     }
 
+    // Fallback to TaskStore for persisted results
+    const stored = await this.config.taskStore.getTask(runId);
+    if (!stored) throw new Error(`Subagent ${runId} not found`);
+
+    const mappedStatus = mapTaskStatus(stored.status);
+    if (TERMINAL.has(mappedStatus) && stored.result) {
+      // Return persisted result for completed tasks
+      const result = stored.result as SubagentResult;
+      return {
+        runId,
+        status: mappedStatus,
+        output: result.output,
+        error: result.error,
+        summary: result.summary,
+        stats: result.stats,
+      };
+    }
+
+    // Non-terminal persisted task: return observational status without modifying the task
     return {
       runId,
-      status: run.status,
-      createdAt: run.createdAt,
-      startedAt: run.startedAt,
-      finishedAt: run.finishedAt,
+      status: mappedStatus,
+      error: `Subagent ${runId} is in non-terminal state: ${stored.status}`,
     };
   }
 
-  /**
-   * 订阅子 Agent 事件（不复用 EventEmitter.on，避免签名冲突）
-   */
+  async cancel(runId: string): Promise<void> {
+    const run = this.runs.get(runId);
+    if (!run) {
+      const stored = await this.config.taskStore.getTask(runId);
+      if (!stored || TERMINAL.has(mapTaskStatus(stored.status))) return;
+      await this.config.taskStore.updateTaskStatus(runId, 'cancelled', {
+        error: 'Subagent cancelled',
+      });
+      return;
+    }
+    if (TERMINAL.has(run.status)) return;
+
+    run.status = 'cancelled';
+    await this.config.taskStore.updateTaskStatus(runId, 'cancelled', {
+      error: 'Subagent cancelled',
+    });
+    run.agent?.stop();
+    this.finish(run, { status: 'cancelled', error: 'Subagent cancelled' });
+    this.emit('subagent-cancelled', { runId });
+  }
+
+  async getStatus(runId: string): Promise<SubagentStatus> {
+    const run = this.runs.get(runId);
+    if (run) {
+      return {
+        runId,
+        status: run.status,
+        createdAt: run.createdAt,
+        startedAt: run.startedAt,
+        finishedAt: run.finishedAt,
+      };
+    }
+
+    const stored = await this.config.taskStore.getTask(runId);
+    if (!stored) throw new Error(`Subagent ${runId} not found`);
+    return {
+      runId,
+      status: mapTaskStatus(stored.status),
+      createdAt: stored.createdAt,
+      startedAt: stored.startedAt,
+      finishedAt: stored.finishedAt,
+    };
+  }
+
   subscribeSubagent(runId: string, event: SubagentEventName, listener: (data: any) => void): void {
     if (!this.eventListeners.has(runId)) {
       this.eventListeners.set(runId, new Map());
     }
-    const runListeners = this.eventListeners.get(runId)!;
-    if (!runListeners.has(event)) {
-      runListeners.set(event, new Set());
-    }
-    runListeners.get(event)!.add(listener);
+    const listeners = this.eventListeners.get(runId)!;
+    if (!listeners.has(event)) listeners.set(event, new Set());
+    listeners.get(event)!.add(listener);
   }
 
-  /**
-   * 取消订阅
-   */
   unsubscribeSubagent(runId: string, event: SubagentEventName, listener: (data: any) => void): void {
     this.eventListeners.get(runId)?.get(event)?.delete(listener);
   }
 
-  /**
-   * 清理已结束的运行记录（内存管理用）
-   */
   cleanup(runId: string): void {
     const run = this.runs.get(runId);
     if (run && !TERMINAL.has(run.status)) return;
@@ -245,44 +277,106 @@ export class SubagentRuntime extends EventEmitter implements ISubagentRuntime {
     this.eventListeners.delete(runId);
   }
 
-  /**
-   * 执行子 Agent。结束时若已被 cancel/timeout 抢先置为终态，finish 不会覆盖。
-   */
+  private makeRun(runId: string, request: SubagentRequest, depth: number): SubagentRun {
+    let resolveDone!: (result: SubagentResult) => void;
+    const promise = new Promise<SubagentResult>(resolve => {
+      resolveDone = resolve;
+    });
+    return {
+      runId,
+      request,
+      status: 'pending',
+      promise,
+      resolveDone,
+      createdAt: Date.now(),
+      depth,
+    };
+  }
+
+  private createAgent(request: SubagentRequest, sessionId: string, depth: number): PlainAgent {
+    const tools = this.config.toolPolicy.filterTools(this.config.parentConfig.tools, request.tools);
+    const agentConfig: AgentConfig = {
+      llm: this.config.parentConfig.llm,
+      tools,
+      maxIterations: request.config?.maxIterations ?? 50,
+      sessionId,
+      storage: this.config.parentConfig.storage,
+      taskStore: this.config.taskStore,
+      permissionMode: request.config?.permissionMode ?? this.config.parentConfig.permissionMode,
+      historyManagement: this.config.parentConfig.historyManagement,
+      systemPrompt: this.buildSystemPrompt(request),
+      subagentRuntime: depth + 1 < this.config.maxDepth ? this : undefined,
+    };
+    return this.config.agentFactory(agentConfig);
+  }
+
   private async execute(run: SubagentRun): Promise<void> {
     const agent: PlainAgent = run.agent!;
-    run.startedAt = Date.now();
+    if (run.result || TERMINAL.has(run.status)) {
+      if (run.status === 'cancelled') {
+        await this.config.taskStore.updateTaskStatus(run.runId, 'cancelled', {
+          error: 'Subagent cancelled',
+        });
+      }
+      return;
+    }
+
+    const task = await this.config.taskStore.claimTask(run.runId, `subagent-${run.runId}`);
+    if (!task) {
+      if (run.result || TERMINAL.has(run.status)) return;
+      this.finish(run, { status: 'failed', error: `Unable to claim subagent ${run.runId}` });
+      return;
+    }
+    if (run.result || TERMINAL.has(run.status)) {
+      if (run.status === 'cancelled') {
+        await this.config.taskStore.updateTaskStatus(run.runId, 'cancelled', {
+          error: 'Subagent cancelled',
+        });
+      }
+      return;
+    }
+
+    run.startedAt = task.startedAt ?? Date.now();
     run.status = 'running';
+    const onAgentEvent = (event: AgentEvent) => {
+      this.emit('subagent-progress', { runId: run.runId, event });
+      if (event.type === 'tool_start') this.emitSubagentEvent(run.runId, 'tool_call', event);
+      else this.emitSubagentEvent(run.runId, 'progress', event);
+      void this.config.taskStore
+        .appendEvent(run.runId, `agent-${event.type}`, event)
+        .catch(error => console.error('Failed to persist subagent event:', error));
+    };
+    agent.on('event', onAgentEvent);
 
     try {
-      const output = await agent.submit(run.request.task);
+      await this.config.parentConfig.storage?.createSession(task.sessionId, 'Subtask');
+      const output = await agent.submit(run.request.task, run.runId);
       const messages = agent.getMessages(true);
       this.finish(run, {
         status: 'completed',
         output,
         summary: summarize(output),
-        iterations: messages.filter(m => m.role === 'assistant').length,
+        iterations: messages.filter(message => message.role === 'assistant').length,
         toolCalls: countToolCalls(messages),
       });
     } catch (error: any) {
       this.finish(run, { status: 'failed', error: error?.message ?? String(error) });
     } finally {
-      agent.destroy();
+      (agent as any).off?.('event', onAgentEvent);
+      (agent as any).destroy?.();
     }
   }
 
-  /**
-   * 写入终态（只生效一次）并通知等待方
-   */
   private finish(
     run: SubagentRun,
     outcome: {
-      status: SubagentResult['status'];
+      status: 'completed' | 'failed' | 'cancelled';
       output?: string;
       error?: string;
       summary?: string;
       iterations?: number;
       toolCalls?: number;
-    }
+    },
   ): SubagentResult {
     if (run.result) return run.result;
 
@@ -307,9 +401,8 @@ export class SubagentRuntime extends EventEmitter implements ISubagentRuntime {
     run.finishedAt = finishedAt;
     run.result = result;
     run.resolveDone(result);
-
-    this.config.taskStore.updateTaskStatus(run.runId, outcome.status, result)
-      .catch(err => console.error('Failed to update subagent task:', err));
+    void this.config.taskStore.updateTaskStatus(run.runId, outcome.status, result)
+      .catch(error => console.error('Failed to update subagent task:', error));
 
     if (outcome.status === 'completed') {
       this.emitSubagentEvent(run.runId, 'completed', result);
@@ -318,8 +411,14 @@ export class SubagentRuntime extends EventEmitter implements ISubagentRuntime {
       this.emitSubagentEvent(run.runId, 'error', { error: outcome.error });
       this.emit('subagent-failed', { runId: run.runId, error: outcome.error });
     }
-
     return result;
+  }
+
+  private async markStoredTaskFailed(runId: string, message: string): Promise<void> {
+    const claimed = await this.config.taskStore.claimTask(runId, `subagent-${runId}`);
+    if (claimed) {
+      await this.config.taskStore.updateTaskStatus(runId, 'failed', { error: message });
+    }
   }
 
   private getRun(runId: string): SubagentRun {
@@ -328,35 +427,24 @@ export class SubagentRuntime extends EventEmitter implements ISubagentRuntime {
     return run;
   }
 
-  /**
-   * 构建子 Agent 的 system prompt（任务本身作为 user 消息提交，这里只放角色与上下文）
-   */
   private buildSystemPrompt(request: SubagentRequest): string {
     let prompt = 'You are a sub-agent delegated a specific subtask by a parent agent.\n\n';
-
-    if (request.role) {
-      prompt += `Role: ${request.role}\n\n`;
-    }
-
+    if (request.role) prompt += `Role: ${request.role}\n\n`;
     if (request.context?.summary) {
       prompt += `Context from parent agent:\n${request.context.summary}\n\n`;
     }
-
-    if (request.context?.files && request.context.files.length > 0) {
-      prompt += `Relevant files:\n${request.context.files.map(f => `- ${f}`).join('\n')}\n\n`;
+    if (request.context?.files?.length) {
+      prompt += `Relevant files:\n${request.context.files.map(file => `- ${file}`).join('\n')}\n\n`;
     }
-
     prompt += 'Focus on completing this specific task efficiently. ';
     prompt += 'Avoid unnecessary exploration. ';
-    prompt += 'When done, reply with a clear, self-contained summary of the result — the parent agent only sees your final reply.';
-
+    prompt += 'When done, reply with a clear, self-contained summary of the result.';
     return prompt;
   }
 
   private emitSubagentEvent(runId: string, event: SubagentEventName, data: any): void {
     const listeners = this.eventListeners.get(runId)?.get(event);
     if (!listeners) return;
-
     listeners.forEach(listener => {
       try {
         listener(data);
@@ -367,25 +455,12 @@ export class SubagentRuntime extends EventEmitter implements ISubagentRuntime {
   }
 }
 
-function summarize(output: string): string {
-  return output.length <= SUMMARY_MAX_LENGTH ? output : output.slice(0, SUMMARY_MAX_LENGTH) + '... (truncated)';
-}
-
-function countToolCalls(messages: ChatMessage[]): number {
-  return messages.reduce((n, m) => n + (m.tool_calls?.length ?? 0), 0);
-}
-
-// ============ 默认实现 ============
-
-/**
- * 默认工具策略：基于白名单过滤；未指定白名单时只给显式标记为只读的工具
- */
 class DefaultToolPolicy implements ToolPolicy {
   filterTools(allTools: Tool[], allowedToolNames?: string[]): Tool[] {
     if (!allowedToolNames || allowedToolNames.length === 0) {
-      return allTools.filter(t => t.meta?.readonly === true);
+      return allTools.filter(tool => tool.meta?.readonly === true);
     }
-    return allTools.filter(t => allowedToolNames.includes(t.name));
+    return allTools.filter(tool => allowedToolNames.includes(tool.name));
   }
 
   async checkToolCall(): Promise<boolean> {
@@ -393,48 +468,18 @@ class DefaultToolPolicy implements ToolPolicy {
   }
 }
 
-/**
- * 内存任务存储（简单实现）
- */
-class MemoryTaskStore implements TaskStore {
-  private tasks = new Map<string, any>();
+function mapTaskStatus(status: TaskRecord['status']): SubagentStatus['status'] {
+  if (status === 'queued' || status === 'paused') return 'pending';
+  if (status === 'completed' || status === 'failed' || status === 'cancelled') return status;
+  return 'running';
+}
 
-  async saveTask(task: any): Promise<void> {
-    this.tasks.set(task.runId, { ...task });
-  }
+function summarize(output: string): string {
+  return output.length <= SUMMARY_MAX_LENGTH
+    ? output
+    : `${output.slice(0, SUMMARY_MAX_LENGTH)}... (truncated)`;
+}
 
-  async updateTaskStatus(runId: string, status: string, result?: SubagentResult): Promise<void> {
-    const task = this.tasks.get(runId);
-    if (task) {
-      task.status = status;
-      task.result = result;
-      task.startedAt = result?.stats?.startedAt;
-      task.finishedAt = result?.stats?.finishedAt;
-    }
-  }
-
-  async loadPendingTasks(parentRunId: string): Promise<SubagentRequest[]> {
-    return Array.from(this.tasks.values())
-      .filter(t => t.parentRunId === parentRunId && !TERMINAL.has(t.status))
-      .map(t => t.request);
-  }
-
-  async getTaskHistory(parentRunId: string): Promise<SubagentResult[]> {
-    return Array.from(this.tasks.values())
-      .filter(t => t.parentRunId === parentRunId && t.result)
-      .map(t => t.result);
-  }
-
-  async getTask(runId: string): Promise<SubagentStatus | null> {
-    const task = this.tasks.get(runId);
-    if (!task) return null;
-
-    return {
-      runId: task.runId,
-      status: task.status,
-      createdAt: task.createdAt,
-      startedAt: task.startedAt,
-      finishedAt: task.finishedAt,
-    };
-  }
+function countToolCalls(messages: ChatMessage[]): number {
+  return messages.reduce((count, message) => count + (message.tool_calls?.length ?? 0), 0);
 }

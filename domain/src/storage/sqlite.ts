@@ -6,6 +6,8 @@
 
 import { createRequire } from 'module';
 import type { SessionStorage, Session, ChatMessage, AgentEvent, PersistedJob } from '../types';
+import { SQLiteTaskStore } from '../tasks';
+import type { TaskStore } from '../tasks';
 
 /** 入库输出上限（截断保留尾部，更早的内容由 job_output 工具的内存注册表兜底） */
 const JOB_OUTPUT_CAP = 50 * 1024;
@@ -22,7 +24,13 @@ export class SQLiteStorage implements SessionStorage {
     const { DatabaseSync } = require('node:sqlite');
 
     this.db = new DatabaseSync(dbPath);
+    this.db.exec('PRAGMA foreign_keys = ON;');
     this.initTables();
+  }
+
+  /** Create a task store backed by this storage's database connection. */
+  getTaskStore(): TaskStore {
+    return new SQLiteTaskStore(this.db);
   }
 
   private initTables(): void {
@@ -181,6 +189,18 @@ export class SQLiteStorage implements SessionStorage {
   }
 
   async deleteSession(sessionId: string): Promise<void> {
+    const taskStore = this.getTaskStore();
+    const tasks = await taskStore.listTasks({ sessionId });
+    const childSessions = new Set<string>();
+    for (const root of tasks) {
+      for (const member of await taskStore.listTasks({ rootId: root.rootId })) {
+        if (member.sessionId !== sessionId) childSessions.add(member.sessionId);
+      }
+    }
+    await taskStore.deleteTasksBySession(sessionId);
+    for (const childSession of childSessions) {
+      this.db.prepare(`DELETE FROM sessions WHERE id = ?`).run(childSession);
+    }
     // 由于有 ON DELETE CASCADE，删除会话时会自动删除关联的消息和事件
     this.db.prepare(`
       DELETE FROM sessions WHERE id = ?

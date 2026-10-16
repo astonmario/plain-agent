@@ -31,6 +31,8 @@ export interface TuiInfo {
 
 interface AppProps {
   createAgent: (sessionId?: string) => Promise<PlainAgent> | PlainAgent;
+  submitTask?: (agent: PlainAgent, task: string) => Promise<string>;
+  stopTask?: (agent: PlainAgent, taskId?: string) => void;
   /** 用于 /resume 列会话；null 表示无持久化 */
   storage: SessionStorage | null;
   info: TuiInfo;
@@ -262,11 +264,12 @@ export default function App(props: AppProps) {
   const handleCancel = useCallback(() => {
     if (isProcessing && agentRef.current) {
       addMessage(MessageType.SYSTEM, 'Stopping agent...');
-      agentRef.current.stop();
+      if (props.stopTask) props.stopTask(agentRef.current);
+      else agentRef.current.stop();
     } else {
       exit();
     }
-  }, [isProcessing, addMessage, exit]);
+  }, [isProcessing, addMessage, exit, props.stopTask]);
 
   const switchSession = useCallback(
     (sessionId?: string) => {
@@ -386,7 +389,12 @@ export default function App(props: AppProps) {
       {
         name: '/stop',
         description: '停止当前任务',
-        handler: () => agentRef.current?.stop(),
+        handler: () => {
+          const agent = agentRef.current;
+          if (!agent) return;
+          if (props.stopTask) props.stopTask(agent);
+          else agent.stop();
+        },
       },
       {
         name: '/exit',
@@ -405,13 +413,16 @@ export default function App(props: AppProps) {
       }
       setPendingOptions(null);
       setIsProcessing(true);
-      agentRef.current.submit(value).catch((err) => {
+      const submission = props.submitTask
+        ? props.submitTask(agentRef.current, value)
+        : agentRef.current.submit(value);
+      submission.catch((err) => {
         if (err instanceof Error && err.name !== 'AbortError') {
           addMessage(MessageType.ERROR, `提交失败: ${err.message}`);
         }
       });
     },
-    [addMessage],
+    [addMessage, props.submitTask],
   );
 
   const handleSubmit = (value: string) => {

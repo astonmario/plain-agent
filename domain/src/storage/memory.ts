@@ -3,12 +3,19 @@
  */
 
 import type { SessionStorage, Session, ChatMessage, AgentEvent, PersistedJob } from '../types';
+import { MemoryTaskStore } from '../tasks';
+import type { TaskStore } from '../tasks';
 
 export class MemoryStorage implements SessionStorage {
   private sessions = new Map<string, Session>();
   private messages = new Map<string, ChatMessage[]>();
   private events = new Map<string, AgentEvent[]>();
   private jobs = new Map<string, Map<string, PersistedJob>>();
+  private taskStore = new MemoryTaskStore();
+
+  getTaskStore(): TaskStore {
+    return this.taskStore;
+  }
 
   async createSession(sessionId: string, title: string): Promise<void> {
     if (!this.sessions.has(sessionId)) {
@@ -67,10 +74,24 @@ export class MemoryStorage implements SessionStorage {
   }
 
   async deleteSession(sessionId: string): Promise<void> {
+    const tasks = await this.taskStore.listTasks({ sessionId });
+    const childSessions = new Set<string>();
+    for (const root of tasks) {
+      for (const member of await this.taskStore.listTasks({ rootId: root.rootId })) {
+        if (member.sessionId !== sessionId) childSessions.add(member.sessionId);
+      }
+    }
+    for (const childSession of childSessions) {
+      this.sessions.delete(childSession);
+      this.messages.delete(childSession);
+      this.events.delete(childSession);
+      this.jobs.delete(childSession);
+    }
     this.sessions.delete(sessionId);
     this.messages.delete(sessionId);
     this.events.delete(sessionId);
     this.jobs.delete(sessionId);
+    await this.taskStore.deleteTasksBySession(sessionId);
   }
 
   async saveJob(sessionId: string, job: PersistedJob): Promise<void> {
@@ -106,5 +127,6 @@ export class MemoryStorage implements SessionStorage {
     this.messages.clear();
     this.events.clear();
     this.jobs.clear();
+    this.taskStore.clear();
   }
 }

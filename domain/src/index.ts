@@ -54,6 +54,11 @@ export { AnchorManager } from './anchor';
 export { CompressionTrigger } from './compression-trigger';
 export { DEFAULT_SYSTEM_PROMPT } from './prompt';
 export { SubagentRuntime, getSubagentTools } from './subagent';
+export {
+  MemoryTaskStore,
+  SQLiteTaskStore,
+  TaskOrchestrator,
+} from './tasks';
 
 export type {
   AgentConfig,
@@ -99,5 +104,12 @@ export type {
   SubagentStatus,
   SubagentRuntime as ISubagentRuntime,
   ToolPolicy,
-  TaskStore,
 } from './subagent';
+export type {
+  TaskStore,
+  TaskRecord,
+  TaskEventRecord,
+  TaskStatus,
+  TaskOrchestratorConfig,
+  TaskRecoveryResult,
+} from './tasks';

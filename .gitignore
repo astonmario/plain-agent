@@ -8,3 +8,13 @@ out/
 .env
 .DS_Store
 Thumbs.db
+
+# AI Agent 生成的文件夹
+.codex
+.claude
+.cursor
+.aider
+.copilot
+.github-copilot
+.planning
+.artifacts

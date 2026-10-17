@@ -53,6 +53,8 @@ export default function App(props: AppProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingText, setStreamingText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  /** 正在等待模型首个 token：只驱动状态行的文案，不写入消息列表 */
+  const [thinking, setThinking] = useState(false);
   const [usage, setUsage] = useState<{ tokens: number; maxTokens: number } | null>(null);
   const [interaction, setInteraction] = useState<{ id: string; questions: any[] } | null>(null);
   const [sessionSelectMode, setSessionSelectMode] = useState(false);
@@ -116,19 +118,24 @@ export default function App(props: AppProps) {
       switch (e.type) {
         case 'user':
           flushTools();
+          setThinking(false);
           addMessage(MessageType.USER, e.message);
           break;
         case 'text_delta':
+          setThinking(false);
           streamRef.current += e.delta;
           setStreamingText(streamRef.current);
           break;
         case 'assistant':
+          setThinking(false);
           flushStream();
           break;
         case 'thinking':
-          addMessage(MessageType.THINKING, e.content);
+          // 瞬时状态：只改状态行文案，回答/工具/结束都会清掉
+          setThinking(true);
           break;
         case 'tool_start':
+          setThinking(false);
           toolIdCounter.current += 1;
           const toolId = `tool-${toolIdCounter.current}`;
           toolCallsRef.current.set(toolId, {
@@ -162,6 +169,7 @@ export default function App(props: AppProps) {
         case 'iteration':
           flushTools();
           flushStream();
+          setThinking(false);
           addMessage(MessageType.ITERATION, `迭代 ${e.index}`);
           break;
         case 'compression':
@@ -174,6 +182,7 @@ export default function App(props: AppProps) {
         case 'interaction':
           flushTools();
           flushStream();
+          setThinking(false);
           setInteraction({ id: e.id, questions: e.questions });
           break;
         case 'error':
@@ -181,6 +190,7 @@ export default function App(props: AppProps) {
           flushStream();
           addMessage(MessageType.ERROR, e.error.message);
           setIsProcessing(false);
+          setThinking(false);
           setInteraction(null);
           break;
         case 'done':
@@ -188,6 +198,7 @@ export default function App(props: AppProps) {
           flushTools();
           flushStream();
           setIsProcessing(false);
+          setThinking(false);
           setInteraction(null);
           refreshUsage();
           break;
@@ -196,10 +207,12 @@ export default function App(props: AppProps) {
           flushStream();
           addMessage(MessageType.SYSTEM, '⏹ 已停止');
           setIsProcessing(false);
+          setThinking(false);
           setInteraction(null);
           break;
         case 'task-start':
           setIsProcessing(true);
+          setThinking(false);
           break;
       }
     };
@@ -264,6 +277,7 @@ export default function App(props: AppProps) {
   const handleCancel = useCallback(() => {
     if (isProcessing && agentRef.current) {
       addMessage(MessageType.SYSTEM, 'Stopping agent...');
+      setThinking(false);
       if (props.stopTask) props.stopTask(agentRef.current);
       else agentRef.current.stop();
     } else {
@@ -490,7 +504,7 @@ export default function App(props: AppProps) {
       {isProcessing && (
         <Box>
           <Spinner color="#F59E0B" />
-          <Text color="#F59E0B">{' 处理中… '}</Text>
+          <Text color="#F59E0B">{thinking ? ' 思考中… ' : ' 处理中… '}</Text>
           {usage && (
             <Text dimColor>
               {usage.tokens}/{usage.maxTokens} tok

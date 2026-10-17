@@ -14,7 +14,6 @@ const TYPE_COLORS: Record<MessageType, string> = {
   [MessageType.TOOL]: '#8B5CF6',
   [MessageType.ITERATION]: '#6B7280',
   [MessageType.ASSISTANT]: '#10B981',
-  [MessageType.THINKING]: '#F59E0B',
   [MessageType.ERROR]: '#EF4444',
   [MessageType.WARNING]: '#EAB308',
 };
@@ -25,7 +24,6 @@ const TYPE_LABELS: Record<MessageType, string> = {
   [MessageType.TOOL]: '',
   [MessageType.ITERATION]: '↺',
   [MessageType.ASSISTANT]: '● Assistant',
-  [MessageType.THINKING]: '◆ Thinking',
   [MessageType.ERROR]: '✗',
   [MessageType.WARNING]: '⚠',
 };
@@ -64,7 +62,7 @@ export function MessageItem({ message, showTimestamp = false }: {
       {/* 系统、错误、警告等其他消息类型 */}
       {message.type !== MessageType.USER && message.type !== MessageType.ASSISTANT && (
         <Text color={color} bold>
-          {label} {message.type !== MessageType.SYSTEM && message.type !== MessageType.THINKING ? message.type : ''}
+          {label} {message.type !== MessageType.SYSTEM ? message.type : ''}
         </Text>
       )}
 

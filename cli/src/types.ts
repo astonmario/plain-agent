@@ -8,7 +8,6 @@ export enum MessageType {
   TOOL = 'TOOL',
   ITERATION = 'ITERATION',
   ASSISTANT = 'ASSISTANT',
-  THINKING = 'THINKING',
   ERROR = 'ERROR',
   WARNING = 'WARNING',
 }

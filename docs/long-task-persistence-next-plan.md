@@ -623,3 +623,5 @@ Lane E: Step 5（等待 Step 4）
 6. 运行现有 domain/CLI/Desktop/Server typecheck 和任务测试。
 
 这样可以先把“任务完成是否可信”固定下来，再进入 OS 进程恢复这一块风险更高的工作。
+
+> **2026-10-18 更新：Step 0 + Step 1 已完成。** 计划文档 `docs/long-task-verification-plan.md`，coding 文档 `docs/long-task-verification-code-plan.md`。`verifying` 已具备租约续期、崩溃恢复（不重跑 Agent turn）、逐检查证据落库和 store 级完成守卫；CLI `--verify` 与 Desktop `settings.verification` 已接线。下一阶段为 P3-B（后台进程持久化观察）。

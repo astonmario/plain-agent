@@ -23,6 +23,7 @@ import { HistoryManager } from './history-manager';
 import { createHistoryLookupTool, createHistorySearchTool } from './tools/history-lookup';
 import { JobRegistry } from './tools/jobs';
 import { DEFAULT_SYSTEM_PROMPT } from './prompt';
+import { renderPreferencesPrompt } from './session-preferences';
 import { discoverSkills, skillsCatalogPrompt } from './skills';
 import { applyProxyConfig } from './proxy';
 import { SubagentRuntime, getSubagentTools } from './subagent';
@@ -562,6 +563,9 @@ export class PlainAgent extends EventEmitter {
         }
       }
 
+      // 注入会话偏好（只改发送副本，不回写历史）
+      messagesToSend = await this.withSessionPreferences(messagesToSend);
+
       // 执行 ReAct 循环（核心逻辑在 loop.ts）
       // 注意：messagesToSend 会被 agentLoop 修改，添加新消息
       const result = await agentLoop(
@@ -764,6 +768,28 @@ export class PlainAgent extends EventEmitter {
     return this.config.taskStore;
   }
 
+  /**
+   * 把会话偏好追加到 system prompt。
+   * 只改本次请求的副本，不写回 fullMessages / task transcript，
+   * 避免偏好文本在历史里累积或影响 prompt 缓存之外的持久内容。
+   */
+  private async withSessionPreferences(messages: ChatMessage[]): Promise<ChatMessage[]> {
+    const storage = this.storage;
+    if (!storage?.getSessionPreferences) return messages;
+    const block = renderPreferencesPrompt(await storage.getSessionPreferences(this.sessionId));
+    if (!block) return messages;
+
+    const systemIndex = messages.findIndex(message => message.role === 'system');
+    if (systemIndex === -1) {
+      return [{ role: 'system', content: block }, ...messages];
+    }
+    return messages.map((message, index) =>
+      index === systemIndex
+        ? { ...message, content: `${message.content ?? ''}\n\n${block}` }
+        : message,
+    );
+  }
+
   private async loadTaskContext(taskId: string): Promise<TaskExecutionContext> {
     const existing = this.taskContexts.get(taskId);
     if (existing) return existing;
@@ -909,6 +935,8 @@ export class PlainAgent extends EventEmitter {
           );
         }
       }
+
+      messagesToSend = await this.withSessionPreferences(messagesToSend);
 
       const result = await agentLoop(
         prompt,

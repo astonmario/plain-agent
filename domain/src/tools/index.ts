@@ -13,6 +13,7 @@ export { exploreTool, globTool, grepTool } from './search';
 export { jobOutputTool, jobKillTool } from './job-tools';
 export { JobRegistry } from './jobs';
 export { updateMemoryTool } from './memory-tool';
+export { setSessionPreferencesTool } from './session-preferences';
 export { createHistoryLookupTool, createHistorySearchTool } from './history-lookup';
 export { webFetchTool, webSearchTool, htmlToMarkdown } from './web';
 export { browserUseTool } from './browser';
@@ -27,6 +28,7 @@ import { listDirectoryTool, calculatorTool, datetimeTool } from './utility';
 import { exploreTool, globTool, grepTool } from './search';
 import { jobOutputTool, jobKillTool } from './job-tools';
 import { updateMemoryTool } from './memory-tool';
+import { setSessionPreferencesTool } from './session-preferences';
 import { webFetchTool, webSearchTool } from './web';
 import { browserUseTool } from './browser';
 import { askQuestionTool } from './ask';
@@ -52,6 +54,7 @@ export function getBuiltinTools(): Tool[] {
     jobOutputTool,
     jobKillTool,
     updateMemoryTool,
+    setSessionPreferencesTool,
     webFetchTool,
     webSearchTool,
     browserUseTool,

@@ -7,7 +7,13 @@ export type { AgentTurnResult } from './agent';
 export { agentLoop } from './loop';
 export { callLLM, streamLLM, ToolCallAccumulator } from './llm';
 export { SQLiteStorage, MemoryStorage } from './storage';
-export { getBuiltinTools, readFileTool, writeFileTool, bashTool } from './tools';
+export {
+  getBuiltinTools,
+  readFileTool,
+  writeFileTool,
+  bashTool,
+  setSessionPreferencesTool,
+} from './tools';
 export {
   webFetchTool,
   webSearchTool,
@@ -51,6 +57,19 @@ export {
   installRemoteSkill,
 } from './skill-discovery';
 export { HistoryManager, estimateTokens } from './history-manager';
+export {
+  mergeSessionPreferences,
+  renderPreferencesPrompt,
+  describePreferences,
+  hasPreferences,
+} from './session-preferences';
+export type {
+  SessionPreferences,
+  SessionTone,
+  SessionLanguage,
+  SessionDepth,
+  SessionPreferenceKey,
+} from './session-preferences';
 export { AnchorManager } from './anchor';
 export { CompressionTrigger } from './compression-trigger';
 export { DEFAULT_SYSTEM_PROMPT } from './prompt';

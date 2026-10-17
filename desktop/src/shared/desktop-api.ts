@@ -20,6 +20,11 @@ export interface AgentConfigInfo {
   permissionMode: string;
 }
 
+export interface VerificationSettings {
+  mode: 'off' | 'required';
+  checks: Array<{ name: string; command: string }>;
+}
+
 export interface AppSettings {
   apiKey: string;
   model: string;
@@ -29,6 +34,7 @@ export interface AppSettings {
   proxy?: string;      // HTTP 代理 URL，如 http://127.0.0.1:7890
   noProxy?: string;    // 代理白名单，如 localhost,127.0.0.1
   githubToken?: string; // GitHub Personal Access Token，用于技能发现
+  verification?: VerificationSettings; // 任务完成前的验证命令（默认关闭）
 }
 
 /** 工作区信息 */

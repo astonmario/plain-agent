@@ -1,4 +1,5 @@
 import type { SubagentRequest } from '../subagent/types';
+import type { TaskVerificationPolicy } from './verification';
 
 export type TaskStatus =
   | 'queued'
@@ -29,6 +30,8 @@ export interface TaskRecord {
   leaseOwner?: string;
   leaseUntil?: number;
   checkpointId?: string;
+  /** Task-level verification policy; undefined means mode='off'. */
+  verification?: TaskVerificationPolicy;
   resultSummary?: string;
   resultRef?: string;
   result?: unknown;

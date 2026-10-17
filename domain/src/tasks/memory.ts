@@ -1,5 +1,12 @@
+import { randomUUID } from 'node:crypto';
 import type { TaskEventRecord, TaskRecord, TaskStatus } from './types';
 import type { TaskCheckpoint } from './checkpoints';
+import type {
+  TaskVerificationRecord,
+  VerificationCheckOutcome,
+  VerificationCheckSeed,
+  VerificationStatus,
+} from './verification';
 import { canTransition, normalizeTaskStatus } from './transitions';
 import type { TaskStore, TaskTerminalStatus } from './store';
 
@@ -8,6 +15,12 @@ export const DEFAULT_TASK_LEASE_MS = 60_000;
 const CLAIMABLE: ReadonlySet<TaskStatus> = new Set([
   'queued',
   'running',
+]);
+/** Lease expiry also scans verifying, which recovers without a new attempt. */
+const RECOVERABLE: ReadonlySet<TaskStatus> = new Set([
+  'queued',
+  'running',
+  'verifying',
 ]);
 
 function clone<T>(value: T): T {
@@ -18,6 +31,7 @@ export class MemoryTaskStore implements TaskStore {
   private tasks = new Map<string, TaskRecord>();
   private events = new Map<string, TaskEventRecord[]>();
   private checkpoints = new Map<string, TaskCheckpoint>();
+  private verifications = new Map<string, TaskVerificationRecord>();
   private nextSeq = 1;
 
   async createTask(task: TaskRecord): Promise<void> {
@@ -143,6 +157,18 @@ export class MemoryTaskStore implements TaskStore {
         !canTransition(current.status, status)) {
       return false;
     }
+    if (status === 'completed' && current.verification?.mode === 'required') {
+      const passed = [...this.verifications.values()].some(record =>
+        record.taskId === taskId && record.attempt === attempt && record.status === 'passed',
+      );
+      if (!passed) {
+        await this.appendEvent(taskId, 'completion-rejected', {
+          reason: 'verification-required-but-not-passed',
+          attempt,
+        });
+        return false;
+      }
+    }
     return this.updateTaskStatus(taskId, status, result);
   }
 
@@ -215,7 +241,7 @@ export class MemoryTaskStore implements TaskStore {
   ): Promise<boolean> {
     const current = this.tasks.get(taskId);
     if (!current ||
-        current.status !== 'running' ||
+        (current.status !== 'running' && current.status !== 'verifying') ||
         current.leaseOwner !== workerId ||
         current.attempt !== attempt) {
       return false;
@@ -281,7 +307,7 @@ export class MemoryTaskStore implements TaskStore {
     const now = Date.now();
     if (!current ||
         current.leaseOwner !== workerId ||
-        current.status !== 'running' ||
+        (current.status !== 'running' && current.status !== 'verifying') ||
         current.leaseUntil === undefined ||
         current.leaseUntil <= now ||
         (attempt !== undefined && current.attempt !== attempt)) return false;
@@ -307,8 +333,36 @@ export class MemoryTaskStore implements TaskStore {
       if (
         current.leaseUntil !== undefined &&
         current.leaseUntil <= now &&
-        CLAIMABLE.has(current.status)
+        RECOVERABLE.has(current.status)
       ) {
+        if (current.status === 'verifying') {
+          // Verification is not a new attempt: release the lease, keep status/attempt.
+          const verification = [...this.verifications.values()]
+            .filter(record => record.taskId === current.id && record.attempt === current.attempt)
+            .sort((a, b) => b.startedAt - a.startedAt)[0];
+          current.leaseOwner = undefined;
+          current.leaseUntil = undefined;
+          current.updatedAt = now;
+          if (verification) {
+            if (verification.status === 'running') verification.status = 'interrupted';
+            for (const check of verification.checks) {
+              if (check.status === 'running') {
+                check.status = 'interrupted';
+                check.finishedAt = now;
+              }
+            }
+          }
+          count++;
+          await this.appendEvent(current.id, 'lease-expired', {
+            recoveredAt: now,
+            nextStatus: 'verifying',
+          });
+          await this.appendEvent(current.id, 'verification-interrupted', {
+            attempt: current.attempt,
+          });
+          continue;
+        }
+
         const exhausted = current.attempt >= current.maxAttempts;
         current.status = exhausted ? 'failed' : 'queued';
         current.leaseOwner = undefined;
@@ -340,7 +394,9 @@ export class MemoryTaskStore implements TaskStore {
         task.status === 'queued' ||
         (task.status === 'running' &&
           task.leaseUntil !== undefined &&
-          task.leaseUntil <= now),
+          task.leaseUntil <= now) ||
+        (task.status === 'verifying' &&
+          (task.leaseUntil === undefined || task.leaseUntil <= now)),
       )
       .sort((a, b) => a.createdAt - b.createdAt)
       .map(clone);
@@ -401,6 +457,245 @@ export class MemoryTaskStore implements TaskStore {
     return true;
   }
 
+  async beginVerification(
+    taskId: string,
+    workerId: string,
+    attempt: number,
+    checks: VerificationCheckSeed[],
+  ): Promise<TaskVerificationRecord | null> {
+    if (checks.length === 0) return null;
+    const now = Date.now();
+    const current = this.tasks.get(taskId);
+    if (
+      !current ||
+      current.status !== 'running' ||
+      current.leaseOwner !== workerId ||
+      current.attempt !== attempt ||
+      current.leaseUntil === undefined ||
+      current.leaseUntil <= now
+    ) {
+      return null;
+    }
+
+    const existing = [...this.verifications.values()].find(record =>
+      record.taskId === taskId &&
+      record.attempt === attempt &&
+      (record.status === 'running' || record.status === 'interrupted'),
+    );
+    if (existing) return clone(existing);
+
+    const record: TaskVerificationRecord = {
+      id: randomUUID(),
+      taskId,
+      attempt,
+      status: 'running',
+      checks: checks.map(check => ({
+        index: check.index,
+        name: check.name,
+        kind: check.kind,
+        command: check.command,
+        status: 'pending',
+      })),
+      changedFiles: [],
+      startedAt: now,
+    };
+    this.verifications.set(record.id, record);
+    current.status = 'verifying';
+    current.updatedAt = now;
+    await this.appendEvent(taskId, 'status-changed', { from: 'running', to: 'verifying' });
+    await this.appendEvent(taskId, 'verification-started', {
+      verificationId: record.id,
+      attempt,
+    });
+    return clone(record);
+  }
+
+  async getVerification(verificationId: string): Promise<TaskVerificationRecord | null> {
+    const record = this.verifications.get(verificationId);
+    return record ? clone(record) : null;
+  }
+
+  async getLatestVerification(
+    taskId: string,
+    attempt?: number,
+  ): Promise<TaskVerificationRecord | null> {
+    const record = [...this.verifications.values()]
+      .filter(candidate =>
+        candidate.taskId === taskId &&
+        (attempt === undefined || candidate.attempt === attempt),
+      )
+      .sort((a, b) => b.startedAt - a.startedAt)[0];
+    return record ? clone(record) : null;
+  }
+
+  async listVerifications(taskId: string): Promise<TaskVerificationRecord[]> {
+    return [...this.verifications.values()]
+      .filter(record => record.taskId === taskId)
+      .sort((a, b) => a.startedAt - b.startedAt)
+      .map(clone);
+  }
+
+  async claimVerification(
+    taskId: string,
+    workerId: string,
+  ): Promise<{ task: TaskRecord; verification: TaskVerificationRecord } | null> {
+    const now = Date.now();
+    const current = this.tasks.get(taskId);
+    const free = current && current.status === 'verifying' &&
+      (current.leaseOwner === undefined ||
+        current.leaseUntil === undefined ||
+        current.leaseUntil <= now);
+    if (!current || !free) return null;
+
+    const verification = [...this.verifications.values()]
+      .filter(record => record.taskId === taskId && record.attempt === current.attempt)
+      .sort((a, b) => b.startedAt - a.startedAt)[0];
+    if (!verification) return null;
+
+    current.leaseOwner = workerId;
+    current.leaseUntil = now + DEFAULT_TASK_LEASE_MS;
+    current.updatedAt = now;
+    if (verification.status === 'interrupted') verification.status = 'running';
+    await this.appendEvent(taskId, 'verification-claimed', {
+      workerId,
+      verificationId: verification.id,
+      attempt: current.attempt,
+    });
+    return { task: clone(current), verification: clone(verification) };
+  }
+
+  async startVerificationCheck(
+    verificationId: string,
+    index: number,
+    workerId: string,
+  ): Promise<boolean> {
+    const now = Date.now();
+    const record = this.verifications.get(verificationId);
+    if (!record || !this.canDriveVerification(record, workerId, now)) return false;
+    const check = record.checks.find(candidate => candidate.index === index);
+    if (!check || !['pending', 'running', 'interrupted'].includes(check.status)) return false;
+    check.status = 'running';
+    check.startedAt = now;
+    check.error = undefined;
+    await this.appendEvent(record.taskId, 'verification-check-started', {
+      verificationId,
+      index,
+    });
+    return true;
+  }
+
+  async finishVerificationCheck(
+    verificationId: string,
+    index: number,
+    workerId: string,
+    outcome: VerificationCheckOutcome,
+  ): Promise<boolean> {
+    const now = Date.now();
+    const record = this.verifications.get(verificationId);
+    if (!record || !this.canDriveVerification(record, workerId, now)) return false;
+    const check = record.checks.find(candidate => candidate.index === index);
+    if (!check || check.status !== 'running') return false;
+    check.status = outcome.status;
+    check.exitCode = outcome.exitCode ?? undefined;
+    check.outputRef = outcome.outputRef;
+    check.outputTail = outcome.outputTail;
+    check.durationMs = outcome.durationMs;
+    check.error = outcome.error;
+    check.finishedAt = now;
+    await this.appendEvent(record.taskId, 'verification-check-completed', {
+      verificationId,
+      index,
+      status: outcome.status,
+      exitCode: outcome.exitCode ?? null,
+    });
+    return true;
+  }
+
+  async concludeVerification(
+    verificationId: string,
+    workerId: string,
+    input: {
+      passed: boolean;
+      changedFiles: string[];
+      diffHash?: string;
+      result?: unknown;
+      error?: string;
+    },
+  ): Promise<'completed' | 'failed' | null> {
+    const now = Date.now();
+    const record = this.verifications.get(verificationId);
+    if (!record || !this.canDriveVerification(record, workerId, now)) return null;
+    const task = this.tasks.get(record.taskId);
+    if (!task || task.status !== 'verifying' || task.leaseOwner !== workerId) return null;
+
+    if (!input.passed) {
+      for (const check of record.checks) {
+        if (check.status === 'pending' || check.status === 'interrupted') {
+          check.status = 'skipped';
+          check.finishedAt = now;
+        }
+      }
+    }
+    record.status = input.passed ? 'passed' : 'failed';
+    record.changedFiles = [...input.changedFiles];
+    record.diffHash = input.diffHash;
+    record.error = input.error;
+    record.finishedAt = now;
+
+    const finalStatus = input.passed ? 'completed' : 'failed';
+    const patch: Partial<TaskRecord> = {
+      status: finalStatus,
+      finishedAt: now,
+      leaseOwner: undefined,
+      leaseUntil: undefined,
+      updatedAt: now,
+    };
+    if (input.result !== undefined) {
+      patch.result = input.result;
+      if (typeof input.result === 'object' && input.result !== null) {
+        const value = input.result as Record<string, unknown>;
+        if (typeof value.summary === 'string') patch.resultSummary = value.summary;
+        else if (typeof value.output === 'string') patch.resultSummary = value.output.slice(0, 500);
+      }
+    }
+    if (input.error !== undefined) patch.error = input.error;
+    Object.assign(task, patch);
+
+    await this.appendEvent(task.id, 'status-changed', { from: 'verifying', to: finalStatus });
+    await this.appendEvent(
+      task.id,
+      input.passed ? 'verification-completed' : 'verification-failed',
+      input.passed
+        ? { verificationId, changedFiles: input.changedFiles, diffHash: input.diffHash ?? null }
+        : { verificationId, error: input.error ?? 'verification-failed' },
+    );
+    await this.appendEvent(
+      task.id,
+      input.passed ? 'task-completed' : 'task-failed',
+      input.passed
+        ? { verificationId }
+        : { verificationId, error: input.error ?? 'verification-failed' },
+    );
+    return finalStatus;
+  }
+
+  private canDriveVerification(
+    record: TaskVerificationRecord,
+    workerId: string,
+    now: number,
+  ): boolean {
+    const task = this.tasks.get(record.taskId);
+    return Boolean(
+      task &&
+      record.status === 'running' &&
+      task.status === 'verifying' &&
+      task.attempt === record.attempt &&
+      task.leaseOwner === workerId &&
+      task.leaseUntil !== undefined &&
+      task.leaseUntil > now,
+    );
+  }
+
   async appendEvent(taskId: string, type: string, data: unknown): Promise<TaskEventRecord> {
     const event: TaskEventRecord = {
       seq: this.nextSeq++,
@@ -434,6 +729,9 @@ export class MemoryTaskStore implements TaskStore {
         for (const checkpoint of this.checkpoints.values()) {
           if (checkpoint.taskId === task.id) this.checkpoints.delete(checkpoint.id);
         }
+        for (const verification of this.verifications.values()) {
+          if (verification.taskId === task.id) this.verifications.delete(verification.id);
+        }
       }
     }
   }
@@ -442,6 +740,7 @@ export class MemoryTaskStore implements TaskStore {
     this.tasks.clear();
     this.events.clear();
     this.checkpoints.clear();
+    this.verifications.clear();
     this.nextSeq = 1;
   }
 }

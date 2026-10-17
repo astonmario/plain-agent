@@ -1,5 +1,10 @@
 import type { TaskEventRecord, TaskRecord, TaskStatus } from './types';
 import type { TaskCheckpoint } from './checkpoints';
+import type {
+  TaskVerificationRecord,
+  VerificationCheckOutcome,
+  VerificationCheckSeed,
+} from './verification';
 
 export type TaskTerminalStatus = 'completed' | 'failed' | 'cancelled';
 
@@ -71,6 +76,56 @@ export interface TaskStore {
 
   appendEvent(taskId: string, type: string, data: unknown): Promise<TaskEventRecord>;
   listEvents(taskId: string, afterSeq?: number): Promise<TaskEventRecord[]>;
+
+  /**
+   * running -> verifying（原子）。
+   * 该 (taskId, attempt) 已有 running/interrupted 记录时直接返回它（幂等）。
+   * Guard: status='running' AND lease_owner=workerId AND attempt AND lease 未过期。
+   */
+  beginVerification(
+    taskId: string,
+    workerId: string,
+    attempt: number,
+    checks: VerificationCheckSeed[],
+  ): Promise<TaskVerificationRecord | null>;
+  getVerification(verificationId: string): Promise<TaskVerificationRecord | null>;
+  getLatestVerification(taskId: string, attempt?: number): Promise<TaskVerificationRecord | null>;
+  listVerifications(taskId: string): Promise<TaskVerificationRecord[]>;
+  /**
+   * 恢复路径：只接管租约，不改变 status/attempt。
+   * Guard: status='verifying' AND (lease 为空或已过期)。
+   */
+  claimVerification(
+    taskId: string,
+    workerId: string,
+  ): Promise<{ task: TaskRecord; verification: TaskVerificationRecord } | null>;
+  startVerificationCheck(
+    verificationId: string,
+    index: number,
+    workerId: string,
+  ): Promise<boolean>;
+  finishVerificationCheck(
+    verificationId: string,
+    index: number,
+    workerId: string,
+    outcome: VerificationCheckOutcome,
+  ): Promise<boolean>;
+  /**
+   * verifying -> completed | failed（原子：证据 + 状态 + 事件 + 释放租约）。
+   * 非当前 worker/attempt，或任务已不是 verifying 时返回 null。
+   */
+  concludeVerification(
+    verificationId: string,
+    workerId: string,
+    input: {
+      passed: boolean;
+      changedFiles: string[];
+      diffHash?: string;
+      result?: unknown;
+      error?: string;
+    },
+  ): Promise<'completed' | 'failed' | null>;
+
   deleteTasksBySession(sessionId: string): Promise<void>;
 }
 

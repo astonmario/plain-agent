@@ -59,6 +59,10 @@ export {
   MemoryTaskStore,
   SQLiteTaskStore,
   TaskOrchestrator,
+  collectGitEvidence,
+  runVerificationCheck,
+  runVerificationFlow,
+  resumeVerificationFlow,
 } from './tasks';
 
 export type {
@@ -116,4 +120,17 @@ export type {
   TaskStatus,
   TaskOrchestratorConfig,
   TaskRecoveryResult,
+  TaskRunOptions,
+  TaskVerificationPolicy,
+  TaskVerificationRecord,
+  VerificationCheck,
+  VerificationCheckOutcome,
+  VerificationCheckRecord,
+  VerificationCheckSeed,
+  VerificationCheckStatus,
+  VerificationFlowDeps,
+  VerificationFlowResult,
+  VerificationStatus,
+  VerificationCheckRunner,
+  VerificationRunContext,
 } from './tasks';

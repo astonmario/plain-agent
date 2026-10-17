@@ -26,7 +26,9 @@
     "test:jobs": "tsx test/test-job-persistence.ts",
     "test:logfile": "tsx test/test-job-logfile.ts",
     "test:loop": "tsx test/test-loop.ts",
-    "test:tasks": "tsx test/test-task-store.ts && tsx test/test-task-orchestrator.ts && tsx test/test-task-recovery.ts && tsx test/test-task-transcript.ts && tsx test/test-task-checkpoint.ts && tsx test/test-task-resume.ts",
+    "test:tasks": "tsx test/test-task-store.ts && tsx test/test-task-orchestrator.ts && tsx test/test-task-recovery.ts && tsx test/test-task-transcript.ts && tsx test/test-task-checkpoint.ts && tsx test/test-task-resume.ts && tsx test/test-task-verification.ts && tsx test/test-task-verification-crash.ts",
+    "test:verification": "tsx test/test-task-verification.ts && tsx test/test-task-verification-crash.ts",
+    "test:verification:crash": "tsx test/test-task-verification-crash.ts",
     "test:subagent": "tsx test/test-subagent-runtime.ts",
     "test:subagent:e2e": "tsx test/test-subagent.ts"
   },

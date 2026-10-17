@@ -1,9 +1,18 @@
 import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type { PlainAgent } from '../agent';
 import type { AgentEvent, SessionStorage } from '../types';
 import type { TaskStore } from './store';
 import type { TaskRecord, TaskStatus } from './types';
+import type { TaskVerificationPolicy } from './verification';
+import {
+  runVerificationFlow,
+  resumeVerificationFlow,
+  type VerificationFlowDeps,
+} from './verification-flow';
+import { runVerificationCheck, type VerificationCheckRunner } from './verification-runner';
 
 export interface TaskOrchestratorConfig {
   taskStore: TaskStore;
@@ -13,8 +22,19 @@ export interface TaskOrchestratorConfig {
   leaseRenewIntervalMs?: number;
   /** Maximum ReAct iterations executed in one durable turn. */
   turnMaxIterations?: number;
+  /** Root directory for verification commands; defaults to process.cwd(). */
+  workspaceRoot?: string | (() => string);
+  /** Root directory for verification logs; defaults to ~/.plain-agent/tasks. */
+  verificationLogRoot?: string;
+  /** Injectable check runner (tests / custom hosts); defaults to the built-in runner. */
+  verificationRunner?: VerificationCheckRunner;
   createAgent: (sessionId: string) => PlainAgent;
   prepareAgent?: (agent: PlainAgent, sessionId: string, taskId: string) => Promise<void>;
+}
+
+export interface TaskRunOptions {
+  /** Verification policy for a task created by this call. Ignored when taskId is given. */
+  verification?: TaskVerificationPolicy;
 }
 
 export interface TaskRecoveryResult {
@@ -51,6 +71,7 @@ export class TaskOrchestrator extends EventEmitter {
   private readonly active = new Map<string, Promise<string>>();
   private readonly activeAgents = new Map<string, PlainAgent>();
   private readonly activeAttempts = new Map<string, number>();
+  private readonly activeVerifications = new Map<string, AbortController>();
   private readonly renewTimers = new Map<string, ReturnType<typeof setInterval>>();
   private recoveryTimer?: ReturnType<typeof setTimeout>;
 
@@ -70,6 +91,7 @@ export class TaskOrchestrator extends EventEmitter {
       parentId?: string;
       rootId?: string;
       maxAttempts?: number;
+      verification?: TaskVerificationPolicy;
     } = {},
   ): Promise<TaskRecord> {
     const now = Date.now();
@@ -82,6 +104,7 @@ export class TaskOrchestrator extends EventEmitter {
       status: 'queued',
       attempt: 0,
       maxAttempts: options.maxAttempts ?? this.maxAttempts,
+      verification: options.verification,
       createdAt: now,
       updatedAt: now,
     };
@@ -98,10 +121,11 @@ export class TaskOrchestrator extends EventEmitter {
     prompt: string,
     taskId?: string,
     existingAgent?: PlainAgent,
+    options: TaskRunOptions = {},
   ): Promise<string> {
     const task = taskId
       ? await this.config.taskStore.getTask(taskId)
-      : await this.createTask(sessionId, prompt);
+      : await this.createTask(sessionId, prompt, { verification: options.verification });
     if (!task) throw new Error(`Task not found: ${taskId}`);
     if (task.sessionId !== sessionId) {
       throw new Error(`Task ${task.id} belongs to another session`);
@@ -109,6 +133,8 @@ export class TaskOrchestrator extends EventEmitter {
     if (!taskId && task.prompt !== prompt) {
       throw new Error(`Task ${task.id} prompt mismatch`);
     }
+    // Verifying tasks are resumed, never re-executed: claiming would bump the attempt.
+    if (task.status === 'verifying') return this.resume(task.id);
 
     const current = this.active.get(task.id);
     if (current) return current;
@@ -132,7 +158,9 @@ export class TaskOrchestrator extends EventEmitter {
     const current = this.active.get(taskId);
     if (current) return current;
 
-    const execution = this.execute(taskId, undefined, true);
+    const execution = task.status === 'verifying'
+      ? this.resumeVerification(taskId, task)
+      : this.execute(taskId, undefined, true);
     this.active.set(taskId, execution);
     const clearActive = () => {
       if (this.active.get(taskId) === execution) this.active.delete(taskId);
@@ -152,7 +180,8 @@ export class TaskOrchestrator extends EventEmitter {
       task.parentId === undefined &&
       (task.status === 'queued' ||
         task.status === 'waiting_child' ||
-        task.status === 'waiting_process'),
+        task.status === 'waiting_process' ||
+        task.status === 'verifying'),
     );
     const recoverable = new Set(
       (await this.config.taskStore.listRecoverableTasks()).map(task => task.id),
@@ -163,6 +192,18 @@ export class TaskOrchestrator extends EventEmitter {
 
     const results = await Promise.allSettled(roots.map(async task => {
       try {
+        if (task.status === 'verifying') {
+          // A live lease means another worker is still verifying; the scheduled
+          // lease recovery will pick it up once it expires.
+          if (!recoverable.has(task.id)) return 'deferred' as const;
+          await this.appendTaskEvent(task.id, 'task-recovery-started', {
+            rootId: task.rootId,
+            workerId: this.workerId,
+            phase: 'verifying',
+          });
+          return this.resume(task.id);
+        }
+
         const tree = await this.config.taskStore.recoverTaskTree(task.rootId);
         const waitingChild = tree.find(member => member.status === 'waiting_child');
         if (waitingChild || !recoverable.has(task.id)) {
@@ -210,6 +251,7 @@ export class TaskOrchestrator extends EventEmitter {
 
     const agent = this.activeAgents.get(taskId);
     agent?.stop(taskId);
+    this.activeVerifications.get(taskId)?.abort();
     const attempt = this.activeAttempts.get(taskId);
     const changed = attempt === undefined
       ? await this.config.taskStore.updateTaskStatus(taskId, 'cancelled', {
@@ -251,6 +293,10 @@ export class TaskOrchestrator extends EventEmitter {
     for (const taskId of this.renewTimers.keys()) {
       this.stopRenewal(taskId);
     }
+    for (const controller of this.activeVerifications.values()) {
+      controller.abort();
+    }
+    this.activeVerifications.clear();
     if (this.recoveryTimer) {
       clearTimeout(this.recoveryTimer);
       this.recoveryTimer = undefined;
@@ -259,6 +305,54 @@ export class TaskOrchestrator extends EventEmitter {
 
   async getTask(taskId: string): Promise<TaskRecord | null> {
     return this.config.taskStore.getTask(taskId);
+  }
+
+  /**
+   * Resume a task that is already in `verifying`. Claiming the verification only
+   * takes over the lease — it must not start a new attempt or re-run the agent turn.
+   */
+  private async resumeVerification(taskId: string, task: TaskRecord): Promise<string> {
+    const attempt = task.attempt;
+    const controller = new AbortController();
+    this.activeVerifications.set(taskId, controller);
+    this.startRenewal(taskId, attempt, () => controller.abort());
+    try {
+      const outcome = await resumeVerificationFlow(
+        this.verificationDeps(taskId, attempt, controller.signal),
+        { taskId },
+      );
+      if (outcome.status === 'not-owner') throw leaseLostError(taskId, attempt);
+      if (outcome.status === 'failed') {
+        this.emit('task-failed', { taskId, error: outcome.error });
+        throw new Error(outcome.error);
+      }
+      const latest = await this.config.taskStore.getTask(taskId);
+      if (!latest) return '';
+      return TERMINAL.has(latest.status) ? this.resultText(latest) : '';
+    } finally {
+      this.stopRenewal(taskId);
+      this.activeVerifications.delete(taskId);
+    }
+  }
+
+  private verificationDeps(
+    taskId: string,
+    attempt: number,
+    signal?: AbortSignal,
+  ): VerificationFlowDeps {
+    const workspaceRoot = this.config.workspaceRoot;
+    return {
+      store: this.config.taskStore,
+      runner: this.config.verificationRunner ?? runVerificationCheck,
+      workerId: this.workerId,
+      workspaceRoot: typeof workspaceRoot === 'function'
+        ? workspaceRoot()
+        : workspaceRoot ?? process.cwd(),
+      logRoot: this.config.verificationLogRoot ?? join(homedir(), '.plain-agent', 'tasks'),
+      notify: (type, data) => this.emit('task-event', { taskId, type, data }),
+      keepAlive: () => this.config.taskStore.renewLease(taskId, this.workerId, attempt),
+      signal: signal ?? this.activeVerifications.get(taskId)?.signal ?? new AbortController().signal,
+    };
   }
 
   private async execute(
@@ -407,24 +501,58 @@ export class TaskOrchestrator extends EventEmitter {
           output,
           summary: summarize(output),
         };
-        const completed = await this.config.taskStore.finishAttempt(
-          taskId,
-          this.workerId,
-          claimed.attempt,
-          'completed',
-          result,
-        );
-        if (!completed) {
-          const current = await this.config.taskStore.getTask(taskId);
-          if (current?.status === 'cancelled') {
-            throw abortError(`Task ${taskId} was cancelled`);
+
+        const controller = new AbortController();
+        this.activeVerifications.set(taskId, controller);
+        let verification;
+        try {
+          verification = await runVerificationFlow(
+            this.verificationDeps(taskId, claimed.attempt, controller.signal),
+            { task: claimed, attempt: claimed.attempt, output },
+          );
+        } finally {
+          if (this.activeVerifications.get(taskId) === controller) {
+            this.activeVerifications.delete(taskId);
           }
-          if (!ownsAttempt(current, this.workerId, claimed.attempt)) {
-            throw leaseLostError(taskId, claimed.attempt);
-          }
-          throw new Error(`Task ${taskId} could not be completed from ${current?.status ?? 'missing'}`);
         }
-        await this.appendTaskEvent(taskId, 'task-completed', result);
+        if (verification.status === 'not-owner') {
+          throw leaseLostError(taskId, claimed.attempt);
+        }
+        if (verification.status === 'failed') {
+          // When the flow owned the lease, concludeVerification already closed the
+          // task as failed together with its evidence.
+          if (!verification.verificationId) {
+            await this.config.taskStore.finishAttempt(
+              taskId,
+              this.workerId,
+              claimed.attempt,
+              'failed',
+              { error: verification.error, summary: verification.error },
+            );
+          }
+          this.emit('task-failed', { taskId, error: verification.error });
+          throw new Error(verification.error);
+        }
+        if (verification.status === 'skipped') {
+          const completed = await this.config.taskStore.finishAttempt(
+            taskId,
+            this.workerId,
+            claimed.attempt,
+            'completed',
+            result,
+          );
+          if (!completed) {
+            const current = await this.config.taskStore.getTask(taskId);
+            if (current?.status === 'cancelled') {
+              throw abortError(`Task ${taskId} was cancelled`);
+            }
+            if (!ownsAttempt(current, this.workerId, claimed.attempt)) {
+              throw leaseLostError(taskId, claimed.attempt);
+            }
+            throw new Error(`Task ${taskId} could not be completed from ${current?.status ?? 'missing'}`);
+          }
+          await this.appendTaskEvent(taskId, 'task-completed', result);
+        }
         this.emit('task-completed', { taskId, result });
         return output;
       } catch (error) {
@@ -518,7 +646,7 @@ export class TaskOrchestrator extends EventEmitter {
     void this.config.taskStore.listTasks().then(tasks => {
       const nextExpiry = tasks
         .filter(task =>
-          task.status === 'running' &&
+          (task.status === 'running' || task.status === 'verifying') &&
           task.leaseUntil !== undefined &&
           !this.active.has(task.id),
         )

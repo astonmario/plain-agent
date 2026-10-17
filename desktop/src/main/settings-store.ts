@@ -14,6 +14,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   baseUrl: 'https://api.deepseek.com',
   maxTokens: undefined,
   permissionMode: 'standard',
+  verification: { mode: 'off', checks: [] },
 };
 
 export class SettingsStore {

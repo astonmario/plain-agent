@@ -18,7 +18,7 @@ export const ALLOWED_TASK_TRANSITIONS: Record<TaskStatus, readonly TaskStatus[]>
   waiting_process: ['running', 'blocked', 'failed', 'cancelled'],
   waiting_user: ['running', 'cancelled'],
   blocked: ['queued', 'running', 'cancelled'],
-  verifying: ['completed', 'running', 'failed'],
+  verifying: ['completed', 'running', 'failed', 'cancelled'],
   paused: ['queued', 'cancelled'],
   completed: [],
   failed: ['queued', 'cancelled'],

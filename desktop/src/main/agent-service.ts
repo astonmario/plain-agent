@@ -21,6 +21,7 @@ import type {
   TaskStore,
   Tool,
   McpServerConfig,
+  TaskVerificationPolicy,
 } from '@plain-agent/domain';
 import { createSkillDiscovery, installRemoteSkill } from '@plain-agent/domain';
 import type { RemoteSkill, RemoteSkillDetail, SkillInstallOptions } from '@plain-agent/domain';
@@ -116,6 +117,8 @@ export class AgentService {
       taskStore: this.taskStore,
       sessionStorage: this.storage,
       workerId: `desktop-${process.pid}`,
+      // Read lazily so switching workspaces applies to later verifications.
+      workspaceRoot: () => this.currentWorkspace?.path ?? process.cwd(),
       createAgent: (sessionId) => this.createAgent(sessionId),
       prepareAgent: (agent) => agent.loadHistory().then(() => undefined),
     });
@@ -315,7 +318,24 @@ export class AgentService {
     const agent = this.getCurrentAgent();
     // 首次对话后用第一个问题自动命名会话（fire-and-forget）
     this.maybeAutoRenameSession(agent.getSessionId(), task);
-    return this.taskOrchestrator.run(agent.getSessionId(), task, taskId, agent);
+    return this.taskOrchestrator.run(agent.getSessionId(), task, taskId, agent, {
+      verification: this.buildVerificationPolicy(),
+    });
+  }
+
+  /** settings.verification -> 任务验证策略；关闭或缺命令时返回 undefined */
+  private buildVerificationPolicy(): TaskVerificationPolicy | undefined {
+    const settings = this.settings.verification;
+    if (!settings || settings.mode !== 'required') return undefined;
+    const checks = settings.checks
+      .filter(check => check.command.trim().length > 0)
+      .map((check, index) => ({
+        kind: 'command' as const,
+        name: check.name.trim() || `verify-${index + 1}`,
+        command: check.command,
+      }));
+    if (checks.length === 0) return undefined;
+    return { mode: 'required', checks };
   }
 
   /**

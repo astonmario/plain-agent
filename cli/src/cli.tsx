@@ -20,7 +20,13 @@ import {
   loadMcpTools,
   loadProjectMcp,
 } from '@plain-agent/domain';
-import type { SessionStorage, PermissionMode, Tool, TaskStore } from '@plain-agent/domain';
+import type {
+  SessionStorage,
+  PermissionMode,
+  Tool,
+  TaskStore,
+  TaskVerificationPolicy,
+} from '@plain-agent/domain';
 import { readFileSync, existsSync, mkdirSync } from 'fs';
 import { resolve, join } from 'path';
 import { homedir } from 'os';
@@ -157,6 +163,7 @@ const taskOrchestrator = new TaskOrchestrator({
   taskStore,
   sessionStorage: storage,
   workerId: `cli-${process.pid}`,
+  workspaceRoot: process.cwd(),
   createAgent: (sessionId) => createAgent(sessionId),
   prepareAgent: (agent) => agent.loadHistory().then(() => undefined),
 });
@@ -170,6 +177,33 @@ const flagValue = (name: string): string | undefined => {
   if (idx >= 0 && argv[idx + 1] && !argv[idx + 1].startsWith('--')) return argv[idx + 1];
   return undefined;
 };
+
+/** 可重复参数：--verify "cmd" / --verify="cmd" */
+const flagValues = (name: string): string[] => {
+  const values: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === `--${name}` && argv[i + 1] && !argv[i + 1].startsWith('--')) {
+      values.push(argv[++i]);
+    } else if (arg.startsWith(`--${name}=`)) {
+      values.push(arg.slice(name.length + 3));
+    }
+  }
+  return values;
+};
+
+const verifyCommands = flagValues('verify');
+const verification: TaskVerificationPolicy | undefined = verifyCommands.length === 0
+  ? undefined
+  : {
+      mode: 'required',
+      timeoutMs: Number(flagValue('verify-timeout') ?? 120_000),
+      checks: verifyCommands.map((command, index) => ({
+        kind: 'command' as const,
+        name: `verify-${index + 1}`,
+        command,
+      })),
+    };
 
 async function main(): Promise<void> {
   // 子命令：skill
@@ -227,7 +261,7 @@ async function main(): Promise<void> {
       <App
         createAgent={createAgent}
         submitTask={(agent, task) =>
-          taskOrchestrator.run(agent.getSessionId(), task, undefined, agent)
+          taskOrchestrator.run(agent.getSessionId(), task, undefined, agent, { verification })
         }
         stopTask={(agent) => {
           const activeIds = agent.getRunningTasks();

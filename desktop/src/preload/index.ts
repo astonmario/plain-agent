@@ -46,6 +46,7 @@ const api: DesktopAPI = {
   getWorkspace: () => ipcRenderer.invoke('workspace:get'),
   selectWorkspace: () => ipcRenderer.invoke('workspace:select'),
   clearWorkspace: () => ipcRenderer.invoke('workspace:clear'),
+  pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),
 
   onEvent: (callback) => {
     const listener = (_e: Electron.IpcRendererEvent, event: AgentEvent) => {

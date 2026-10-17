@@ -19,6 +19,8 @@ export interface AppSettings {
   proxy?: string;
   noProxy?: string;
   githubToken?: string; // 技能发现用
+  /** 默认文件夹：启动时未选择工作区时自动使用（桌面端） */
+  defaultWorkspace?: string;
   [key: string]: unknown;
 }
 
@@ -135,6 +137,8 @@ export interface AgentClient {
   /** 打开目录选择对话框；用户取消返回 null */
   selectWorkspace?(): Promise<Workspace | null>;
   clearWorkspace?(): Promise<void>;
+  /** 只选择目录并返回路径（用于“默认文件夹”设置，不改变当前工作区） */
+  pickFolder?(): Promise<string | null>;
 
   // ---- MCP 配置 ----
   getMcpConfig(): Promise<Record<string, unknown>>;

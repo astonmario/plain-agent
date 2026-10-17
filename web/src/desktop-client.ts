@@ -50,6 +50,7 @@ interface DesktopAPI {
   getWorkspace(): Promise<Workspace | null>;
   selectWorkspace(): Promise<Workspace | null>;
   clearWorkspace(): Promise<void>;
+  pickFolder(): Promise<string | null>;
   onEvent(callback: (event: AgentEvent) => void): () => void;
 }
 
@@ -237,6 +238,10 @@ export class DesktopClient implements AgentClient {
 
   async clearWorkspace(): Promise<void> {
     await this.api.clearWorkspace();
+  }
+
+  async pickFolder(): Promise<string | null> {
+    return this.api.pickFolder();
   }
 
   // ---- 事件订阅 ----

@@ -4,6 +4,7 @@
  */
 
 import type { TaskStore } from './tasks/store';
+import type { SessionPreferences } from './session-preferences';
 
 // ============ LLM 相关类型 ============
 
@@ -147,10 +148,15 @@ export interface SessionStorage {
   loadMessages(sessionId: string, taskId?: string): Promise<ChatMessage[]>;
   saveEvent(sessionId: string, event: AgentEvent): Promise<void>;
   loadEvents(sessionId: string): Promise<AgentEvent[]>;
-  createSession(sessionId: string, title: string): Promise<void>;
+  createSession(sessionId: string, title: string, workspace?: string): Promise<void>;
   listSessions(): Promise<Session[]>;
   renameSession(sessionId: string, newTitle: string): Promise<void>;
   deleteSession(sessionId: string): Promise<void>;
+
+  /** 读取会话绑定的工作区路径；未绑定返回 null */
+  getSessionWorkspace(sessionId: string): Promise<string | null>;
+  /** 写入会话工作区；null 表示解绑（回退到默认文件夹） */
+  setSessionWorkspace(sessionId: string, workspace: string | null): Promise<void>;
 
   /**
    * 以下三个方法为可选实现（后台任务结果持久化）。
@@ -163,6 +169,13 @@ export interface SessionStorage {
   loadPendingJobs?(sessionId: string): Promise<PersistedJob[]>;
   /** 标记任务已回注；必须幂等（重复调用无副作用） */
   markJobConsumed?(sessionId: string, jobId: string): Promise<void>;
+
+  /**
+   * 会话级偏好（可选实现）。未实现时视为没有偏好，不影响对话。
+   * 覆盖写入：调用方负责合并；空对象等同清除。
+   */
+  getSessionPreferences?(sessionId: string): Promise<SessionPreferences | null>;
+  saveSessionPreferences?(sessionId: string, preferences: SessionPreferences): Promise<void>;
 }
 
 export interface Session {
@@ -171,6 +184,8 @@ export interface Session {
   createdAt: number;
   updatedAt: number;
   status: 'active' | 'archived';
+  /** 会话绑定的工作区（绝对路径）；未绑定时回退到默认文件夹 */
+  workspace?: string;
 }
 
 // ============ 后台任务持久化 ============

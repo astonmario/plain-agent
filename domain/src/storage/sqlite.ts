@@ -6,6 +6,8 @@
 
 import { createRequire } from 'module';
 import type { SessionStorage, Session, ChatMessage, AgentEvent, PersistedJob } from '../types';
+import type { SessionPreferences } from '../session-preferences';
+import { hasPreferences } from '../session-preferences';
 import { SQLiteTaskStore } from '../tasks';
 import type { TaskStore } from '../tasks';
 
@@ -41,6 +43,8 @@ export class SQLiteStorage implements SessionStorage {
         title TEXT NOT NULL,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
+        preferences_json TEXT,
+        workspace TEXT,
         status TEXT CHECK(status IN ('active', 'archived')) DEFAULT 'active'
       );
 
@@ -92,6 +96,15 @@ export class SQLiteStorage implements SessionStorage {
         ON jobs(session_id, consumed_at);
     `);
     this.ensureMessageColumn('task_id', 'TEXT');
+    this.ensureSessionColumn('preferences_json', 'TEXT');
+    this.ensureSessionColumn('workspace', 'TEXT');
+  }
+
+  private ensureSessionColumn(column: string, definition: string): void {
+    const columns = this.db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
+    if (!columns.some(entry => entry.name === column)) {
+      this.db.exec(`ALTER TABLE sessions ADD COLUMN ${column} ${definition}`);
+    }
   }
 
   private ensureMessageColumn(column: string, definition: string): void {
@@ -105,12 +118,26 @@ export class SQLiteStorage implements SessionStorage {
     `);
   }
 
-  async createSession(sessionId: string, title: string): Promise<void> {
+  async createSession(sessionId: string, title: string, workspace?: string): Promise<void> {
     const now = Date.now();
     this.db.prepare(`
-      INSERT OR IGNORE INTO sessions (id, title, created_at, updated_at, status)
-      VALUES (?, ?, ?, ?, 'active')
-    `).run(sessionId, title, now, now);
+      INSERT OR IGNORE INTO sessions (id, title, created_at, updated_at, status, workspace)
+      VALUES (?, ?, ?, ?, 'active', ?)
+    `).run(sessionId, title, now, now, workspace ?? null);
+  }
+
+  async getSessionWorkspace(sessionId: string): Promise<string | null> {
+    const row = this.db.prepare(`
+      SELECT workspace FROM sessions WHERE id = ?
+    `).get(sessionId) as { workspace: string | null } | undefined;
+    return row?.workspace ?? null;
+  }
+
+  async setSessionWorkspace(sessionId: string, workspace: string | null): Promise<void> {
+    await this.createSession(sessionId, 'Untitled');
+    this.db.prepare(`
+      UPDATE sessions SET workspace = ?, updated_at = ? WHERE id = ?
+    `).run(workspace, Date.now(), sessionId);
   }
 
   async saveMessage(sessionId: string, message: ChatMessage, taskId?: string): Promise<void> {
@@ -181,7 +208,7 @@ export class SQLiteStorage implements SessionStorage {
 
   async listSessions(): Promise<Session[]> {
     const rows = this.db.prepare(`
-      SELECT id, title, created_at, updated_at, status
+      SELECT id, title, created_at, updated_at, status, workspace
       FROM sessions
       ORDER BY updated_at DESC
     `).all() as any[];
@@ -192,6 +219,7 @@ export class SQLiteStorage implements SessionStorage {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       status: row.status,
+      workspace: row.workspace ?? undefined,
     }));
   }
 
@@ -201,6 +229,33 @@ export class SQLiteStorage implements SessionStorage {
       SET title = ?, updated_at = ?
       WHERE id = ?
     `).run(newTitle, Date.now(), sessionId);
+  }
+
+  async getSessionPreferences(sessionId: string): Promise<SessionPreferences | null> {
+    const row = this.db.prepare(`
+      SELECT preferences_json FROM sessions WHERE id = ?
+    `).get(sessionId) as { preferences_json: string | null } | undefined;
+    if (!row?.preferences_json) return null;
+    try {
+      return JSON.parse(row.preferences_json) as SessionPreferences;
+    } catch {
+      return null;
+    }
+  }
+
+  async saveSessionPreferences(
+    sessionId: string,
+    preferences: SessionPreferences,
+  ): Promise<void> {
+    await this.createSession(sessionId, 'Untitled');
+    const payload = hasPreferences(preferences)
+      ? JSON.stringify({ ...preferences, updatedAt: Date.now() })
+      : null;
+    this.db.prepare(`
+      UPDATE sessions
+      SET preferences_json = ?, updated_at = ?
+      WHERE id = ?
+    `).run(payload, Date.now(), sessionId);
   }
 
   async deleteSession(sessionId: string): Promise<void> {

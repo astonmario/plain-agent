@@ -221,6 +221,18 @@ function registerIpcHandlers(): void {
     return agentService!.setWorkspace(workspacePath);
   });
 
+  // 仅返回选中的目录路径（用于“默认文件夹”设置，不改变当前工作区）
+  ipcMain.handle('dialog:pickFolder', async () => {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      properties: ['openDirectory'],
+      title: '选择默认文件夹',
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+    return result.filePaths[0];
+  });
+
   ipcMain.handle('workspace:clear', () => {
     agentService!.clearWorkspace();
   });

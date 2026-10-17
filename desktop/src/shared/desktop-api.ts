@@ -35,6 +35,7 @@ export interface AppSettings {
   noProxy?: string;    // 代理白名单，如 localhost,127.0.0.1
   githubToken?: string; // GitHub Personal Access Token，用于技能发现
   verification?: VerificationSettings; // 任务完成前的验证命令（默认关闭）
+  defaultWorkspace?: string; // 默认文件夹：启动时未选择工作区时自动使用
 }
 
 /** 工作区信息 */
@@ -130,6 +131,8 @@ export interface DesktopAPI {
   getWorkspace(): Promise<Workspace | null>;
   selectWorkspace(): Promise<Workspace | null>;
   clearWorkspace(): Promise<void>;
+  /** 打开系统目录选择框，仅返回路径（不改变当前工作区） */
+  pickFolder(): Promise<string | null>;
 
   // 事件订阅
   onEvent(callback: (event: AgentEvent) => void): () => void;

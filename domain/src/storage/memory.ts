@@ -3,6 +3,8 @@
  */
 
 import type { SessionStorage, Session, ChatMessage, AgentEvent, PersistedJob } from '../types';
+import type { SessionPreferences } from '../session-preferences';
+import { hasPreferences } from '../session-preferences';
 import { MemoryTaskStore } from '../tasks';
 import type { TaskStore } from '../tasks';
 
@@ -11,13 +13,14 @@ export class MemoryStorage implements SessionStorage {
   private messages = new Map<string, ChatMessage[]>();
   private events = new Map<string, AgentEvent[]>();
   private jobs = new Map<string, Map<string, PersistedJob>>();
+  private preferences = new Map<string, SessionPreferences>();
   private taskStore = new MemoryTaskStore();
 
   getTaskStore(): TaskStore {
     return this.taskStore;
   }
 
-  async createSession(sessionId: string, title: string): Promise<void> {
+  async createSession(sessionId: string, title: string, workspace?: string): Promise<void> {
     if (!this.sessions.has(sessionId)) {
       const now = Date.now();
       this.sessions.set(sessionId, {
@@ -26,7 +29,21 @@ export class MemoryStorage implements SessionStorage {
         createdAt: now,
         updatedAt: now,
         status: 'active',
+        workspace,
       });
+    }
+  }
+
+  async getSessionWorkspace(sessionId: string): Promise<string | null> {
+    return this.sessions.get(sessionId)?.workspace ?? null;
+  }
+
+  async setSessionWorkspace(sessionId: string, workspace: string | null): Promise<void> {
+    await this.createSession(sessionId, 'Untitled');
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.workspace = workspace ?? undefined;
+      session.updatedAt = Date.now();
     }
   }
 
@@ -100,7 +117,25 @@ export class MemoryStorage implements SessionStorage {
     }
     this.events.delete(sessionId);
     this.jobs.delete(sessionId);
+    this.preferences.delete(sessionId);
     await this.taskStore.deleteTasksBySession(sessionId);
+  }
+
+  async getSessionPreferences(sessionId: string): Promise<SessionPreferences | null> {
+    const preferences = this.preferences.get(sessionId);
+    return preferences ? { ...preferences } : null;
+  }
+
+  async saveSessionPreferences(
+    sessionId: string,
+    preferences: SessionPreferences,
+  ): Promise<void> {
+    await this.createSession(sessionId, 'Untitled');
+    if (!hasPreferences(preferences)) {
+      this.preferences.delete(sessionId);
+      return;
+    }
+    this.preferences.set(sessionId, { ...preferences, updatedAt: Date.now() });
   }
 
   async saveJob(sessionId: string, job: PersistedJob): Promise<void> {

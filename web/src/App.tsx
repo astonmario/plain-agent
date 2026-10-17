@@ -5,6 +5,7 @@ import type { AgentEvent, Session, ChatMessage, InteractionQuestion } from '@pla
 import type { AgentClient, AppSettings, SkillDetail, SkillSummary, AppConfig, HistoryUsage, Workspace } from './api-client';
 import { McpConfigModal } from './McpConfig';
 import { SkillDiscovery } from './SkillDiscovery';
+import { THEMES, applyTheme, getStoredTheme, type ThemeId } from './theme';
 import './styles.css';
 import './extensions.css';
 
@@ -194,6 +195,13 @@ function App({ client }: AppProps) {
   const initializedRef = useRef(false);
   /** EventSource 引用，用于订阅 SSE 事件 */
   const eventSourceRef = useRef<EventSource | null>(null);
+  /** 当前主题（仅渲染层，持久化在 localStorage） */
+  const [theme, setTheme] = useState<ThemeId>(() => getStoredTheme());
+
+  // 主题变化时立即应用到根节点
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
 
   // 可选能力：客户端未实现对应接口时不显示入口（如 Web 端无技能发现/工作区）
   const supportsSkillDiscovery = Boolean(
@@ -243,6 +251,9 @@ function App({ client }: AppProps) {
     streamRef.current = null;
     toolGroupIdRef.current = null;
     await client.switchSession?.(sessionId);
+    // 会话级工作区：切换会话时同步刷新
+    const ws = await client.getWorkspace?.();
+    setWorkspace(ws ?? null);
     const history = await client.getMessages(sessionId, true);
     const uiMessages = history.map(historyToUI).filter((m): m is UIMessage => m !== null);
     setMessages(uiMessages);
@@ -259,6 +270,9 @@ function App({ client }: AppProps) {
     setThinking(false);
     streamRef.current = null;
     toolGroupIdRef.current = null;
+    // 新会话绑定当前工作区
+    const ws = await client.getWorkspace?.();
+    setWorkspace(ws ?? null);
     await refreshSessions();
   }, [refreshSessions]);
 
@@ -286,6 +300,9 @@ function App({ client }: AppProps) {
     await client.updateSettings(settingsForm);
     setShowSettings(false);
     client.getConfig?.().then((cfg) => cfg && setConfig(cfg));
+    // 默认文件夹可能在此次保存后生效，同步当前工作区
+    const ws = await client.getWorkspace?.();
+    if (ws !== undefined) setWorkspace(ws ?? null);
   }, [client, settingsForm]);
 
   /** 选择工作区（用户取消对话框时保持原状） */
@@ -296,11 +313,21 @@ function App({ client }: AppProps) {
     }
   }, [client]);
 
-  /** 清除工作区 */
+  /** 清除工作区：回到默认文件夹 */
   const clearWorkspace = useCallback(async () => {
-    if (!confirm('确定要清除当前工作区吗？将回到默认模式。')) return;
+    if (!confirm('确定要清除当前工作区吗？将回到默认文件夹。')) return;
     await client.clearWorkspace?.();
-    setWorkspace(null);
+    const ws = await client.getWorkspace?.();
+    setWorkspace(ws ?? null);
+  }, [client]);
+
+  /** 选择默认文件夹（仅桌面端；不改变当前工作区） */
+  const pickDefaultFolder = useCallback(async () => {
+    if (!client.pickFolder) return;
+    const path = await client.pickFolder();
+    if (path) {
+      setSettingsForm((prev) => (prev ? { ...prev, defaultWorkspace: path } : prev));
+    }
   }, [client]);
 
   /** 开始编辑会话标题 */
@@ -825,6 +852,10 @@ function App({ client }: AppProps) {
           onChange={setSettingsForm}
           onSave={saveSettings}
           onClose={() => setShowSettings(false)}
+          theme={theme}
+          onThemeChange={setTheme}
+          supportsWorkspace={supportsWorkspace}
+          onPickFolder={client.pickFolder ? pickDefaultFolder : undefined}
         />
       )}
 
@@ -1306,11 +1337,19 @@ function SettingsModal({
   onChange,
   onSave,
   onClose,
+  theme,
+  onThemeChange,
+  supportsWorkspace,
+  onPickFolder,
 }: {
   settings: AppSettings;
   onChange: (settings: AppSettings) => void;
   onSave: () => void;
   onClose: () => void;
+  theme: ThemeId;
+  onThemeChange: (theme: ThemeId) => void;
+  supportsWorkspace?: boolean;
+  onPickFolder?: () => void;
 }) {
   const update = <K extends keyof AppSettings>(field: K, value: AppSettings[K] | undefined) => {
     onChange({ ...settings, [field]: value });
@@ -1327,6 +1366,25 @@ function SettingsModal({
         </div>
 
         <div className="modal-body">
+          <div className="form-field">
+            <label>外观主题</label>
+            <div className="theme-picker">
+              {THEMES.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={`theme-swatch${theme === t.id ? ' active' : ''}`}
+                  onClick={() => onThemeChange(t.id)}
+                  title={t.label}
+                >
+                  <span className="theme-dot" style={{ background: t.accent }} />
+                  <span className="theme-label">{t.label}</span>
+                </button>
+              ))}
+            </div>
+            <span className="form-hint">仅影响本机界面，选择后立即生效并自动保存</span>
+          </div>
+
           <div className="form-field">
             <label>API Key</label>
             <input
@@ -1359,6 +1417,28 @@ function SettingsModal({
               placeholder="https://api.deepseek.com"
             />
           </div>
+
+          {supportsWorkspace && (
+            <div className="form-field">
+              <label>默认文件夹（可选）</label>
+              <div className="folder-input-row">
+                <input
+                  type="text"
+                  value={settings.defaultWorkspace ?? ''}
+                  onChange={(e) => update('defaultWorkspace', e.target.value || undefined)}
+                  placeholder="例如 D:\code\my-project"
+                />
+                {onPickFolder && (
+                  <button type="button" className="btn-browse" onClick={onPickFolder}>
+                    选择…
+                  </button>
+                )}
+              </div>
+              <span className="form-hint">
+                启动时若未选择工作区，将自动使用该目录；留空则使用「文档\plain-agent-default-workspace」
+              </span>
+            </div>
+          )}
 
           <div className="form-field">
             <label>Max Tokens（可选）</label>

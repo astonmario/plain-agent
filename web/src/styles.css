@@ -31,6 +31,154 @@
   --radius-full: 24px;
 }
 
+/* ============ 内置主题（强调色） ============ */
+
+/* 海蓝 */
+:root[data-theme='ocean'] {
+  --bg-app: #f2f6fc;
+  --bg-sidebar: #eaf1fa;
+  --bg-main: #ffffff;
+  --bg-input: #fbfcfe;
+  --bg-hover: #e3ebf8;
+  --bg-active: #d6e3f7;
+  --bg-tool: #f3f7fd;
+  --bg-secondary: #f3f7fd;
+  --bg-tertiary: #e8f0fa;
+  --border: #dbe5f2;
+  --border-strong: #c6d6ea;
+  --accent: #2f6fd0;
+  --accent-hover: #255bb0;
+  --accent-light: #e3edfb;
+  --user-bubble: #2f6fd0;
+}
+
+/* 紫罗兰 */
+:root[data-theme='violet'] {
+  --bg-app: #f6f3fc;
+  --bg-sidebar: #efeaf9;
+  --bg-main: #ffffff;
+  --bg-input: #fcfbfe;
+  --bg-hover: #eae2f9;
+  --bg-active: #e0d5f6;
+  --bg-tool: #f6f2fd;
+  --bg-secondary: #f6f2fd;
+  --bg-tertiary: #ede7fa;
+  --border: #e3dbf2;
+  --border-strong: #d1c4ea;
+  --accent: #7b5cd6;
+  --accent-hover: #6547bd;
+  --accent-light: #efe9fc;
+  --user-bubble: #7b5cd6;
+}
+
+/* 暖橙 */
+:root[data-theme='amber'] {
+  --bg-app: #fbf6ef;
+  --bg-sidebar: #f7efe3;
+  --bg-main: #ffffff;
+  --bg-input: #fdfbf7;
+  --bg-hover: #f4e8d7;
+  --bg-active: #eeddc5;
+  --bg-tool: #fbf6ef;
+  --bg-secondary: #fbf6ef;
+  --bg-tertiary: #f5ecdf;
+  --border: #eee2d0;
+  --border-strong: #e0cdb2;
+  --accent: #b96a1f;
+  --accent-hover: #9a5616;
+  --accent-light: #f8ebdb;
+  --user-bubble: #b96a1f;
+}
+
+/* 玫瑰 */
+:root[data-theme='rose'] {
+  --bg-app: #fcf4f6;
+  --bg-sidebar: #f9ecf0;
+  --bg-main: #ffffff;
+  --bg-input: #fdfafb;
+  --bg-hover: #f7e4ea;
+  --bg-active: #f2d7e0;
+  --bg-tool: #fcf4f6;
+  --bg-secondary: #fcf4f6;
+  --bg-tertiary: #f7e9ee;
+  --border: #f0dfe5;
+  --border-strong: #e3c8d3;
+  --accent: #c04b6b;
+  --accent-hover: #a33c59;
+  --accent-light: #f9e6ec;
+  --user-bubble: #c04b6b;
+}
+
+/* 主题选择器 */
+.theme-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.theme-swatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.theme-swatch:hover {
+  background: var(--bg-hover);
+}
+
+.theme-swatch.active {
+  border-color: var(--accent);
+  background: var(--accent-light);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.theme-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+  flex-shrink: 0;
+}
+
+/* 设置：默认文件夹输入行 */
+.folder-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.folder-input-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.btn-browse {
+  flex-shrink: 0;
+  padding: 8px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  font: inherit;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.btn-browse:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
 * {
   margin: 0;
   padding: 0;

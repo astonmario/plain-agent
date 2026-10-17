@@ -1,5 +1,7 @@
 export interface SubagentRequest {
   parentRunId: string;
+  /** Stable parent tool-call identity for crash-safe spawn deduplication. */
+  parentCallId?: string;
   task: string;
   role?: string;
   context?: {
@@ -18,7 +20,7 @@ export interface SubagentRequest {
 
 export interface SubagentResult {
   runId: string;
-  status: 'completed' | 'failed' | 'cancelled' | 'timeout' | 'pending' | 'running';
+  status: 'completed' | 'failed' | 'cancelled' | 'blocked' | 'timeout' | 'pending' | 'running';
   output?: string;
   error?: string;
   artifacts?: Array<{
@@ -40,7 +42,7 @@ export interface SubagentResult {
 
 export interface SubagentStatus {
   runId: string;
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'timeout';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'blocked' | 'timeout';
   progress?: string;
   createdAt: number;
   startedAt?: number;
@@ -87,5 +89,5 @@ export interface SubagentRun {
   depth: number;
   workerId?: string;
   attempt?: number;
-  persistence?: Promise<void>;
+  persistence?: Promise<SubagentResult>;
 }

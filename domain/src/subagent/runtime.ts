@@ -25,12 +25,14 @@ export interface SubagentRuntimeConfig {
   maxConcurrency?: number;
   defaultTimeout?: number;
   maxDepth?: number;
+  leaseRenewIntervalMs?: number;
 }
 
 const TERMINAL: ReadonlySet<SubagentStatus['status']> = new Set([
   'completed',
   'failed',
   'cancelled',
+  'blocked',
 ]);
 
 const SUMMARY_MAX_LENGTH = 500;
@@ -55,10 +57,20 @@ export class SubagentRuntime extends EventEmitter implements ISubagentRuntime {
       maxConcurrency: config.maxConcurrency ?? 5,
       defaultTimeout: config.defaultTimeout ?? 300_000,
       maxDepth: config.maxDepth ?? 3,
+      leaseRenewIntervalMs: config.leaseRenewIntervalMs ?? 20_000,
     };
   }
 
   async spawn(request: SubagentRequest): Promise<{ runId: string }> {
+    if (request.parentCallId) {
+      const existing = (await this.config.taskStore.listChildren(request.parentRunId))
+        .find(task => task.delegation?.parentCallId === request.parentCallId);
+      if (existing) {
+        await this.recoverPending(request.parentRunId);
+        return { runId: existing.id };
+      }
+    }
+
     const activeCount = [...this.runs.values()].filter(run => !TERMINAL.has(run.status)).length;
     if (activeCount + this.pendingSpawns >= this.config.maxConcurrency) {
       throw new Error(
@@ -110,7 +122,7 @@ export class SubagentRuntime extends EventEmitter implements ISubagentRuntime {
       run.agent = this.createAgent(request, runId, depth);
     } catch (error: any) {
       await this.markStoredTaskFailed(runId, error?.message ?? String(error));
-      this.finish(run, { status: 'failed', error: error?.message ?? String(error) });
+      await this.finish(run, { status: 'failed', error: error?.message ?? String(error) });
       return { runId };
     }
 
@@ -142,18 +154,21 @@ export class SubagentRuntime extends EventEmitter implements ISubagentRuntime {
     for (const task of tasks) {
       if (this.runs.has(task.id)) continue;
       const request: SubagentRequest = {
-        parentRunId: task.parentId ?? task.rootId,
-        task: task.prompt,
+        ...(task.delegation ?? {
+          parentRunId: task.parentId ?? task.rootId,
+          task: task.prompt,
+        }),
       };
-      const run = this.makeRun(task.id, request, 0);
+      const run = this.makeRun(task.id, request, task.depth ?? 0);
       this.runs.set(task.id, run);
       try {
-        run.agent = this.createAgent(request, task.sessionId, 0);
+        run.agent = this.createAgent(request, task.sessionId, task.depth ?? 0);
         void this.execute(run);
         resumed.push(task.id);
       } catch (error: any) {
-        await this.markStoredTaskFailed(task.id, error?.message ?? String(error));
-        this.finish(run, { status: 'failed', error: error?.message ?? String(error) });
+        const message = error?.message ?? String(error);
+        await this.markStoredTaskBlocked(task.id, message);
+        await this.finish(run, { status: 'blocked', error: message });
       }
     }
     return resumed;
@@ -187,30 +202,44 @@ export class SubagentRuntime extends EventEmitter implements ISubagentRuntime {
       }
     }
 
-    // Fallback to TaskStore for persisted results
-    const stored = await this.config.taskStore.getTask(runId);
-    if (!stored) throw new Error(`Subagent ${runId} not found`);
+    const effectiveTimeout = timeout ?? this.config.defaultTimeout;
+    const deadline = Date.now() + effectiveTimeout;
+    while (true) {
+      await this.config.taskStore.recoverExpiredTasks();
+      const stored = await this.config.taskStore.getTask(runId);
+      if (!stored) throw new Error(`Subagent ${runId} not found`);
 
-    const mappedStatus = mapTaskStatus(stored.status);
-    if (TERMINAL.has(mappedStatus) && stored.result) {
-      // Return persisted result for completed tasks
-      const result = stored.result as SubagentResult;
-      return {
-        runId,
-        status: mappedStatus,
-        output: result.output,
-        error: result.error,
-        summary: result.summary,
-        stats: result.stats,
-      };
+      const mappedStatus = mapTaskStatus(stored.status);
+      if (TERMINAL.has(mappedStatus)) {
+        const result = stored.result as SubagentResult | undefined;
+        return {
+          runId,
+          status: mappedStatus,
+          output: result?.output,
+          error: result?.error ?? stored.error,
+          summary: result?.summary,
+          stats: result?.stats,
+        };
+      }
+
+      if (stored.status === 'queued' && stored.parentId) {
+        await this.recoverPending(stored.parentId);
+        const recovered = this.runs.get(runId);
+        if (recovered) {
+          return this.wait(runId, Math.max(1, deadline - Date.now()));
+        }
+      }
+
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        return {
+          runId,
+          status: 'timeout',
+          error: `Subagent ${runId} wait timed out after ${effectiveTimeout}ms`,
+        };
+      }
+      await new Promise(resolve => setTimeout(resolve, Math.min(25, remaining)));
     }
-
-    // Non-terminal persisted task: return observational status without modifying the task
-    return {
-      runId,
-      status: mappedStatus,
-      error: `Subagent ${runId} is in non-terminal state: ${stored.status}`,
-    };
   }
 
   async cancel(runId: string): Promise<void> {
@@ -218,19 +247,23 @@ export class SubagentRuntime extends EventEmitter implements ISubagentRuntime {
     if (!run) {
       const stored = await this.config.taskStore.getTask(runId);
       if (!stored || TERMINAL.has(mapTaskStatus(stored.status))) return;
-      await this.config.taskStore.updateTaskStatus(runId, 'cancelled', {
-        error: 'Subagent cancelled',
-      });
+      const cancelled = stored.leaseOwner
+        ? await this.config.taskStore.cancelAttempt(
+          runId,
+          stored.leaseOwner,
+          stored.attempt,
+          { error: 'Subagent cancelled' },
+        )
+        : await this.config.taskStore.updateTaskStatus(runId, 'cancelled', {
+          error: 'Subagent cancelled',
+        });
+      if (!cancelled) return;
       return;
     }
     if (TERMINAL.has(run.status)) return;
 
-    run.status = 'cancelled';
-    await this.config.taskStore.updateTaskStatus(runId, 'cancelled', {
-      error: 'Subagent cancelled',
-    });
     run.agent?.stop();
-    this.finish(run, { status: 'cancelled', error: 'Subagent cancelled' });
+    await this.finish(run, { status: 'cancelled', error: 'Subagent cancelled' });
     this.emit('subagent-cancelled', { runId });
   }
 
@@ -324,7 +357,14 @@ export class SubagentRuntime extends EventEmitter implements ISubagentRuntime {
     const task = await this.config.taskStore.claimTask(run.runId, `subagent-${run.runId}`);
     if (!task) {
       if (run.result || TERMINAL.has(run.status)) return;
-      this.finish(run, { status: 'failed', error: `Unable to claim subagent ${run.runId}` });
+      const current = await this.config.taskStore.getTask(run.runId);
+      const status = current ? mapTaskStatus(current.status) : 'failed';
+      run.status = status;
+      run.resolveDone({
+        runId: run.runId,
+        status,
+        error: `Unable to claim subagent ${run.runId}`,
+      });
       return;
     }
     if (run.result || TERMINAL.has(run.status)) {
@@ -338,6 +378,22 @@ export class SubagentRuntime extends EventEmitter implements ISubagentRuntime {
 
     run.startedAt = task.startedAt ?? Date.now();
     run.status = 'running';
+    const workerId = `subagent-${run.runId}`;
+    const attempt = task.attempt;
+    run.workerId = workerId;
+    run.attempt = attempt;
+    let leaseLost = false;
+    const leaseTimer = setInterval(() => {
+      void this.config.taskStore.renewLease(run.runId, workerId, attempt).then(renewed => {
+        if (renewed || leaseLost) return;
+        leaseLost = true;
+        run.agent?.stop?.(run.runId);
+      }).catch(error => {
+        this.emit('subagent-error', { runId: run.runId, error });
+      });
+    }, this.config.leaseRenewIntervalMs);
+    const maybeUnref = leaseTimer as ReturnType<typeof setInterval> & { unref?: () => void };
+    maybeUnref.unref?.();
     const onAgentEvent = (event: AgentEvent) => {
       this.emit('subagent-progress', { runId: run.runId, event });
       if (event.type === 'tool_start') this.emitSubagentEvent(run.runId, 'tool_call', event);
@@ -350,9 +406,54 @@ export class SubagentRuntime extends EventEmitter implements ISubagentRuntime {
 
     try {
       await this.config.parentConfig.storage?.createSession(task.sessionId, 'Subtask');
-      const output = await agent.submit(run.request.task, run.runId);
+      await (agent as any).loadHistory?.();
+      await (agent as any).recoverPendingSubagents?.(run.runId);
+      const durableAgent = agent as PlainAgent & {
+        runTurn?: (
+          taskId: string,
+          prompt: string,
+          options?: { maxIterations?: number },
+        ) => Promise<{
+          status: string;
+          output?: string;
+          checkpointId?: string;
+          reason?: string;
+          error?: { message: string };
+        }>;
+        resume?: (
+          taskId: string,
+          checkpointId?: string,
+        ) => Promise<{
+          status: string;
+          output?: string;
+          checkpointId?: string;
+          reason?: string;
+          error?: { message: string };
+        }>;
+      };
+      let output: string;
+      if (typeof durableAgent.runTurn === 'function' && typeof durableAgent.resume === 'function') {
+        let turn = task.checkpointId
+          ? await durableAgent.resume(run.runId, task.checkpointId)
+          : await durableAgent.runTurn(run.runId, run.request.task, {
+            maxIterations: Math.min(run.request.config?.maxIterations ?? 50, 10),
+          });
+        while (turn.status === 'paused') {
+          turn = await durableAgent.resume(run.runId, turn.checkpointId);
+        }
+        if (turn.status === 'blocked') {
+          await this.finish(run, { status: 'blocked', error: turn.reason });
+          return;
+        }
+        if (turn.status !== 'completed') {
+          throw new Error(turn.error?.message ?? turn.reason ?? `Subagent turn ended as ${turn.status}`);
+        }
+        output = turn.output ?? '';
+      } else {
+        output = await agent.submit(run.request.task, run.runId);
+      }
       const messages = agent.getMessages(true);
-      this.finish(run, {
+      await this.finish(run, {
         status: 'completed',
         output,
         summary: summarize(output),
@@ -360,8 +461,9 @@ export class SubagentRuntime extends EventEmitter implements ISubagentRuntime {
         toolCalls: countToolCalls(messages),
       });
     } catch (error: any) {
-      this.finish(run, { status: 'failed', error: error?.message ?? String(error) });
+      await this.finish(run, { status: 'failed', error: error?.message ?? String(error) });
     } finally {
+      clearInterval(leaseTimer);
       (agent as any).off?.('event', onAgentEvent);
       (agent as any).destroy?.();
     }
@@ -370,15 +472,16 @@ export class SubagentRuntime extends EventEmitter implements ISubagentRuntime {
   private finish(
     run: SubagentRun,
     outcome: {
-      status: 'completed' | 'failed' | 'cancelled';
+      status: 'completed' | 'failed' | 'cancelled' | 'blocked';
       output?: string;
       error?: string;
       summary?: string;
       iterations?: number;
       toolCalls?: number;
     },
-  ): SubagentResult {
-    if (run.result) return run.result;
+  ): Promise<SubagentResult> {
+    if (run.persistence) return run.persistence;
+    if (run.result) return Promise.resolve(run.result);
 
     const finishedAt = Date.now();
     const startedAt = run.startedAt ?? run.createdAt;
@@ -397,27 +500,94 @@ export class SubagentRuntime extends EventEmitter implements ISubagentRuntime {
       },
     };
 
-    run.status = outcome.status;
-    run.finishedAt = finishedAt;
-    run.result = result;
-    run.resolveDone(result);
-    void this.config.taskStore.updateTaskStatus(run.runId, outcome.status, result)
-      .catch(error => console.error('Failed to update subagent task:', error));
+    const persistence = (async (): Promise<SubagentResult> => {
+      let finalResult = result;
+      try {
+        await this.persistRunResult(run, result);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error('Failed to update subagent task:', message);
+        finalResult = {
+          ...result,
+          status: 'failed',
+          error: `Could not persist subagent result: ${message}`,
+        };
+      }
 
-    if (outcome.status === 'completed') {
-      this.emitSubagentEvent(run.runId, 'completed', result);
-      this.emit('subagent-completed', { runId: run.runId, result });
-    } else if (outcome.status === 'failed') {
-      this.emitSubagentEvent(run.runId, 'error', { error: outcome.error });
-      this.emit('subagent-failed', { runId: run.runId, error: outcome.error });
+      run.status = finalResult.status;
+      run.finishedAt = Date.now();
+      run.result = finalResult;
+      run.resolveDone(finalResult);
+
+      if (finalResult.status === 'completed') {
+        this.emitSubagentEvent(run.runId, 'completed', finalResult);
+        this.emit('subagent-completed', { runId: run.runId, result: finalResult });
+      } else if (finalResult.status === 'failed' || finalResult.status === 'blocked') {
+        this.emitSubagentEvent(run.runId, 'error', { error: finalResult.error });
+        this.emit('subagent-failed', {
+          runId: run.runId,
+          error: finalResult.error,
+          status: finalResult.status,
+        });
+      }
+      return finalResult;
+    })();
+    run.persistence = persistence;
+    return persistence;
+  }
+
+  private async persistRunResult(run: SubagentRun, result: SubagentResult): Promise<void> {
+    if (!run.workerId || run.attempt === undefined) return;
+
+    const changed = result.status === 'blocked'
+      ? await this.config.taskStore.blockAttempt(
+        run.runId,
+        run.workerId,
+        run.attempt,
+        result.error,
+      )
+      : await this.config.taskStore.finishAttempt(
+        run.runId,
+        run.workerId,
+        run.attempt,
+        result.status as 'completed' | 'failed' | 'cancelled',
+        result,
+      );
+
+    if (!changed) {
+      const current = await this.config.taskStore.getTask(run.runId);
+      if (current?.status !== result.status ||
+          current.attempt !== run.attempt ||
+          current.leaseOwner !== undefined) {
+        throw new Error(
+          `Subagent ${run.runId} no longer owns attempt ${run.attempt}`,
+        );
+      }
     }
-    return result;
   }
 
   private async markStoredTaskFailed(runId: string, message: string): Promise<void> {
     const claimed = await this.config.taskStore.claimTask(runId, `subagent-${runId}`);
     if (claimed) {
-      await this.config.taskStore.updateTaskStatus(runId, 'failed', { error: message });
+      await this.config.taskStore.finishAttempt(
+        runId,
+        `subagent-${runId}`,
+        claimed.attempt,
+        'failed',
+        { error: message },
+      );
+    }
+  }
+
+  private async markStoredTaskBlocked(runId: string, message: string): Promise<void> {
+    const changed = await this.config.taskStore.updateTaskStatus(runId, 'blocked', {
+      error: `Unable to recreate subagent: ${message}`,
+    });
+    if (changed) {
+      await this.config.taskStore.appendEvent(runId, 'task-blocked', {
+        reason: 'subagent-recovery-failed',
+        error: message,
+      });
     }
   }
 
@@ -470,6 +640,7 @@ class DefaultToolPolicy implements ToolPolicy {
 
 function mapTaskStatus(status: TaskRecord['status']): SubagentStatus['status'] {
   if (status === 'queued' || status === 'paused') return 'pending';
+  if (status === 'blocked') return 'blocked';
   if (status === 'completed' || status === 'failed' || status === 'cancelled') return status;
   return 'running';
 }

@@ -91,6 +91,7 @@ export function createSpawnSubagentTool(): Tool {
       try {
         const { runId } = await runtime.spawn({
           parentRunId: ctx.taskId ?? ctx.sessionId,
+          parentCallId: ctx.toolCallId,
           task: args.task,
           role: args.role,
           context: {
@@ -123,6 +124,7 @@ export function createSpawnSubagentTool(): Tool {
     meta: {
       dangerous: false,
       readonly: false,
+      replay: 'idempotent',
       // 子 Agent 各自隔离，并发上限由 runtime 控制：同轮多个 spawn 可并行
       concurrent: true,
       tags: ['subagent', 'delegation'],

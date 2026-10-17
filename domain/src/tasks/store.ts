@@ -1,4 +1,5 @@
 import type { TaskEventRecord, TaskRecord, TaskStatus } from './types';
+import type { TaskCheckpoint } from './checkpoints';
 
 export type TaskTerminalStatus = 'completed' | 'failed' | 'cancelled';
 
@@ -32,6 +33,13 @@ export interface TaskStore {
     status: TaskTerminalStatus,
     result?: unknown,
   ): Promise<boolean>;
+  /** Block only the exact attempt that still owns the lease. */
+  blockAttempt(
+    taskId: string,
+    workerId: string,
+    attempt: number,
+    error?: string,
+  ): Promise<boolean>;
   /** Requeue only the exact attempt that still owns the lease. */
   retryAttempt(taskId: string, workerId: string, attempt: number, error: string): Promise<boolean>;
   /** Cancel only the exact attempt that still owns the lease. */
@@ -42,6 +50,24 @@ export interface TaskStore {
   renewLease(taskId: string, workerId: string, attempt?: number): Promise<boolean>;
   releaseLease(taskId: string, workerId: string, attempt?: number): Promise<boolean>;
   recoverExpiredTasks(now?: number): Promise<number>;
+  /**
+   * Tasks that can be resumed without an external wakeup.
+   * Waiting states are intentionally excluded until their wakeup is materialized.
+   */
+  listRecoverableTasks(now?: number): Promise<TaskRecord[]>;
+  listChildren(parentId: string): Promise<TaskRecord[]>;
+  /** Return a stable snapshot of a task tree after lease recovery. */
+  recoverTaskTree(rootId: string, now?: number): Promise<TaskRecord[]>;
+
+  createCheckpoint(checkpoint: TaskCheckpoint): Promise<void>;
+  getCheckpoint(checkpointId: string): Promise<TaskCheckpoint | null>;
+  getLatestCheckpoint(taskId: string): Promise<TaskCheckpoint | null>;
+  commitCheckpoint(
+    taskId: string,
+    checkpoint: TaskCheckpoint,
+    event: { type: string; data: unknown },
+    guard?: { workerId?: string; attempt?: number },
+  ): Promise<boolean>;
 
   appendEvent(taskId: string, type: string, data: unknown): Promise<TaskEventRecord>;
   listEvents(taskId: string, afterSeq?: number): Promise<TaskEventRecord[]>;

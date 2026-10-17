@@ -1,21 +1,23 @@
 import type { TaskStatus } from './types';
 
 export const ALLOWED_TASK_TRANSITIONS: Record<TaskStatus, readonly TaskStatus[]> = {
-  queued: ['running', 'cancelled'],
+  queued: ['running', 'blocked', 'cancelled'],
   running: [
     'queued',
     'waiting_child',
     'waiting_process',
     'waiting_user',
+    'blocked',
     'verifying',
     'paused',
     'completed',
     'failed',
     'cancelled',
   ],
-  waiting_child: ['running', 'failed', 'cancelled'],
-  waiting_process: ['running', 'failed', 'cancelled'],
+  waiting_child: ['running', 'blocked', 'failed', 'cancelled'],
+  waiting_process: ['running', 'blocked', 'failed', 'cancelled'],
   waiting_user: ['running', 'cancelled'],
+  blocked: ['queued', 'running', 'cancelled'],
   verifying: ['completed', 'running', 'failed'],
   paused: ['queued', 'cancelled'],
   completed: [],

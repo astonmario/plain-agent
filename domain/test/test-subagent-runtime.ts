@@ -7,6 +7,7 @@
 
 import { MemoryStorage, SubagentRuntime } from '../src';
 import type { AgentConfig, Tool } from '../src/types';
+import type { TaskRecord } from '../src/tasks';
 
 let passed = 0;
 let failed = 0;
@@ -72,7 +73,13 @@ class FakeAgent {
   }
 }
 
-function makeRuntime(opts: { delay?: number; maxConcurrency?: number; maxDepth?: number; defaultTimeout?: number } = {}) {
+function makeRuntime(opts: {
+  delay?: number;
+  maxConcurrency?: number;
+  maxDepth?: number;
+  defaultTimeout?: number;
+  leaseRenewIntervalMs?: number;
+} = {}) {
   const created: FakeAgent[] = [];
   const storage = new MemoryStorage();
   const runtime = new SubagentRuntime({
@@ -92,6 +99,7 @@ function makeRuntime(opts: { delay?: number; maxConcurrency?: number; maxDepth?:
     maxConcurrency: opts.maxConcurrency,
     maxDepth: opts.maxDepth,
     defaultTimeout: opts.defaultTimeout,
+    leaseRenewIntervalMs: opts.leaseRenewIntervalMs,
   });
   return { runtime, created, storage };
 }
@@ -249,11 +257,92 @@ async function testCancel() {
   assert(status.status === 'cancelled', `取消后状态不被覆盖为 completed（实际 ${status.status}）`);
 }
 
+async function testLeaseRenewal() {
+  console.log('\n[9] 子 Agent 租约续期');
+  const { runtime, storage } = makeRuntime({ delay: 120, leaseRenewIntervalMs: 5 });
+  const { runId } = await runtime.spawn({ parentRunId: 'root', task: 'lease renewal' });
+  let before = await storage.getTaskStore().getTask(runId);
+  for (let i = 0; i < 20 && before?.status !== 'running'; i++) {
+    await new Promise(resolve => setTimeout(resolve, 2));
+    before = await storage.getTaskStore().getTask(runId);
+  }
+  await new Promise(resolve => setTimeout(resolve, 25));
+  const after = await storage.getTaskStore().getTask(runId);
+  assert(
+    before?.leaseUntil !== undefined &&
+      after?.leaseUntil !== undefined &&
+      after.leaseUntil > before.leaseUntil,
+    'active child task renews its lease while work continues',
+  );
+  const result = await runtime.wait(runId, 1000);
+  assert(result.status === 'completed', 'lease renewal does not prevent normal completion');
+}
+
+async function testPendingChildRecoveryAndSpawnDeduplication() {
+  console.log('\n[10] 子任务恢复与 spawn 去重');
+  const { runtime, storage } = makeRuntime({ delay: 25 });
+  const store = storage.getTaskStore();
+  const now = Date.now();
+  const parent: TaskRecord = {
+    id: 'persisted-parent',
+    rootId: 'persisted-parent',
+    sessionId: 'persisted-parent',
+    prompt: 'parent',
+    status: 'completed',
+    attempt: 1,
+    maxAttempts: 2,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await storage.createSession(parent.sessionId, 'Parent');
+  await store.createTask(parent);
+
+  const request = {
+    parentRunId: parent.id,
+    parentCallId: 'tool-call-stable',
+    task: 'recover the same delegated work',
+  };
+  const { runId } = await runtime.spawn(request);
+  const first = await runtime.wait(runId);
+  const reused = await runtime.spawn(request);
+  assert(first.status === 'completed', 'initial delegated task completes');
+  assert(reused.runId === runId, 'retrying a tool call reuses the existing child task');
+  assert((await store.listChildren(parent.id)).length === 1,
+    'idempotent spawn does not create duplicate child records');
+
+  const childSessionId = 'queued-child-session';
+  await storage.createSession(childSessionId, 'Queued child');
+  const queuedChild: TaskRecord = {
+    id: 'queued-child-task',
+    parentId: parent.id,
+    rootId: parent.rootId,
+    sessionId: childSessionId,
+    prompt: 'resume queued child',
+    status: 'queued',
+    attempt: 0,
+    maxAttempts: 2,
+    delegation: {
+      parentRunId: parent.id,
+      parentCallId: 'queued-child-call',
+      task: 'resume queued child',
+    },
+    depth: 1,
+    createdAt: now + 1,
+    updatedAt: now + 1,
+  };
+  await store.createTask(queuedChild);
+  const recovered = await runtime.recoverPending(parent.id);
+  const recoveredResult = await runtime.wait(queuedChild.id);
+  assert(recovered.includes(queuedChild.id), 'restart recovery claims persisted queued children');
+  assert(recoveredResult.status === 'completed', 'recovered child continues to completion');
+}
+
 async function main() {
   console.log('SubagentRuntime 单元测试');
   const t0 = Date.now();
   const tests = [testSpawnWait, testContextIsolation, testToolWhitelist, testConcurrencyLimit,
-    testDepthLimit, testFailure, testTimeout, testCancel, testRestartAndWait];
+    testDepthLimit, testFailure, testTimeout, testCancel, testLeaseRenewal, testRestartAndWait,
+    testPendingChildRecoveryAndSpawnDeduplication];
   for (const t of tests) {
     try {
       await t();

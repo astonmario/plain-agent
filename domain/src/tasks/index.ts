@@ -1,4 +1,5 @@
 export * from './types';
+export * from './checkpoints';
 export * from './store';
 export * from './transitions';
 export { MemoryTaskStore } from './memory';

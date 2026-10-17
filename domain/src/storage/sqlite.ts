@@ -48,6 +48,7 @@ export class SQLiteStorage implements SessionStorage {
       CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         session_id TEXT NOT NULL,
+        task_id TEXT,
         role TEXT CHECK(role IN ('system', 'user', 'assistant', 'tool')) NOT NULL,
         content TEXT,
         tool_call_id TEXT,
@@ -84,11 +85,23 @@ export class SQLiteStorage implements SessionStorage {
 
       -- 索引
       CREATE INDEX IF NOT EXISTS idx_messages_session
-        ON messages(session_id, created_at);
+        ON messages(session_id, id);
       CREATE INDEX IF NOT EXISTS idx_events_session
         ON events(session_id, created_at);
       CREATE INDEX IF NOT EXISTS idx_jobs_pending
         ON jobs(session_id, consumed_at);
+    `);
+    this.ensureMessageColumn('task_id', 'TEXT');
+  }
+
+  private ensureMessageColumn(column: string, definition: string): void {
+    const columns = this.db.prepare(`PRAGMA table_info(messages)`).all() as Array<{ name: string }>;
+    if (!columns.some(entry => entry.name === column)) {
+      this.db.exec(`ALTER TABLE messages ADD COLUMN ${column} ${definition}`);
+    }
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_messages_session_task
+        ON messages(session_id, task_id, id)
     `);
   }
 
@@ -100,15 +113,16 @@ export class SQLiteStorage implements SessionStorage {
     `).run(sessionId, title, now, now);
   }
 
-  async saveMessage(sessionId: string, message: ChatMessage): Promise<void> {
+  async saveMessage(sessionId: string, message: ChatMessage, taskId?: string): Promise<void> {
     // 确保会话存在
     await this.createSession(sessionId, 'Untitled');
 
     this.db.prepare(`
-      INSERT INTO messages (session_id, role, content, tool_call_id, tool_calls, created_at)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO messages (session_id, task_id, role, content, tool_call_id, tool_calls, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(
       sessionId,
+      taskId ?? null,
       message.role,
       message.content,
       message.tool_call_id || null,
@@ -122,13 +136,14 @@ export class SQLiteStorage implements SessionStorage {
     `).run(Date.now(), sessionId);
   }
 
-  async loadMessages(sessionId: string): Promise<ChatMessage[]> {
+  async loadMessages(sessionId: string, taskId?: string): Promise<ChatMessage[]> {
     const rows = this.db.prepare(`
       SELECT role, content, tool_call_id, tool_calls
       FROM messages
       WHERE session_id = ?
-      ORDER BY created_at ASC
-    `).all(sessionId) as any[];
+        AND ${taskId === undefined ? 'task_id IS NULL' : 'task_id = ?'}
+      ORDER BY id ASC
+    `).all(...(taskId === undefined ? [sessionId] : [sessionId, taskId])) as any[];
 
     return rows.map(row => ({
       role: row.role,

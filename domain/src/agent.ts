@@ -18,6 +18,7 @@
 import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
 import { agentLoop } from './loop';
+import type { AgentLoopBoundary, AgentLoopOptions } from './loop';
 import { HistoryManager } from './history-manager';
 import { createHistoryLookupTool, createHistorySearchTool } from './tools/history-lookup';
 import { JobRegistry } from './tools/jobs';
@@ -34,6 +35,7 @@ import type {
   ToolContext,
   PermissionContext
 } from './types';
+import type { TaskCheckpoint, TaskStore } from './tasks';
 
 /**
  * 后台任务结果回注预算（字符数，防上下文爆炸）：
@@ -44,6 +46,23 @@ import type {
 const JOB_INJECT_MAX_PER_JOB = 2000;
 const JOB_INJECT_MAX_TOTAL = 8000;
 
+export interface AgentTurnResult {
+  status: 'paused' | 'completed' | 'waiting_child' | 'waiting_user' | 'blocked' | 'failed';
+  output?: string;
+  checkpointId?: string;
+  childIds?: string[];
+  approvalId?: string;
+  reason?: string;
+  error?: { name: string; message: string; stack?: string };
+}
+
+interface TaskExecutionContext {
+  taskId: string;
+  messages: ChatMessage[];
+  iteration: number;
+  checkpointId?: string;
+}
+
 export class PlainAgent extends EventEmitter {
   // 任务控制器映射：taskId -> AbortController
   // 用于多任务并发管理，每个任务有独立的取消控制
@@ -52,6 +71,9 @@ export class PlainAgent extends EventEmitter {
   // 完整的消息历史（永不删除，用于追溯）
   // 第一条固定为 system prompt（压缩时会保留，见 history-manager）
   private fullMessages: ChatMessage[] = [];
+
+  // Long-running tasks use isolated transcripts instead of the shared session array.
+  private taskContexts = new Map<string, TaskExecutionContext>();
 
   // system prompt（可通过 config.systemPrompt 覆盖）
   private systemPrompt: string;
@@ -132,8 +154,8 @@ export class PlainAgent extends EventEmitter {
 
     // 如果启用了历史管理，自动注册历史追溯工具
     if (this.historyManager && config.historyManagement?.enabled !== false) {
-      const lookupTool = createHistoryLookupTool(() => this.fullMessages);
-      const searchTool = createHistorySearchTool(() => this.fullMessages);
+      const lookupTool = createHistoryLookupTool((taskId) => this.getHistoryMessages(taskId));
+      const searchTool = createHistorySearchTool((taskId) => this.getHistoryMessages(taskId));
 
       // 添加到工具列表
       this.config.tools = [...this.config.tools, lookupTool, searchTool];
@@ -274,6 +296,107 @@ export class PlainAgent extends EventEmitter {
       console.error('Failed to load history:', error);
       return 0;
     }
+  }
+
+  /**
+   * Run one bounded, durable turn for a persisted task.
+   * The task transcript is independent from the interactive session transcript.
+   */
+  async runTurn(
+    taskId: string,
+    prompt: string,
+    options: { maxIterations?: number } = {},
+  ): Promise<AgentTurnResult> {
+    if (this.taskControllers.has(taskId)) {
+      return { status: 'failed', reason: `Task ${taskId} is already running` };
+    }
+    const context = await this.loadTaskContext(taskId);
+    const task = await this.getTaskStore()?.getTask(taskId);
+    const appendTaskPrompt = prompt.length > 0 &&
+      !context.messages.some(message => message.role === 'user');
+    const maxIterations = options.maxIterations ??
+      Math.min(this.config.maxIterations ?? 150, 10);
+
+    this.emitTaskStarted(taskId, task?.prompt ?? prompt);
+    return this.executeTaskTurn(context, task ?? null, prompt, {
+      appendTaskPrompt,
+      startIteration: context.iteration,
+      maxIterations,
+      pauseOnBudget: true,
+    });
+  }
+
+  /**
+   * Resume a task from its latest stable checkpoint.
+   */
+  async resume(
+    taskId: string,
+    checkpointId?: string,
+  ): Promise<AgentTurnResult> {
+    if (this.taskControllers.has(taskId)) {
+      return { status: 'failed', reason: `Task ${taskId} is already running` };
+    }
+    const store = this.getTaskStore();
+    const context = await this.loadTaskContext(taskId);
+    const task = await store?.getTask(taskId);
+    const checkpoint = checkpointId
+      ? await store?.getCheckpoint(checkpointId)
+      : task?.checkpointId
+        ? await store?.getCheckpoint(task.checkpointId)
+        : await store?.getLatestCheckpoint(taskId);
+
+    this.emitTaskStarted(taskId, task?.prompt ?? '');
+
+    if (checkpoint) {
+      context.checkpointId = checkpoint.id;
+      context.iteration = checkpoint.iteration;
+    }
+
+    // An after-LLM checkpoint with no pending tool calls already contains the
+    // final assistant response. Replaying the model here would duplicate work.
+    if (
+      checkpoint?.state.phase === 'after_llm' &&
+      checkpoint.state.nextAction === 'complete'
+    ) {
+      const finalMessage = [...context.messages]
+        .reverse()
+        .find(message => message.role === 'assistant' && !message.tool_calls?.length);
+      await store?.appendEvent(taskId, 'resume-completed', {
+        checkpointId: checkpoint.id,
+        iteration: checkpoint.iteration,
+      });
+      const output = finalMessage?.content ?? '';
+      this.emitEvent({
+        type: 'done',
+        result: output,
+        timestamp: Date.now(),
+      });
+      this.emitTaskEnded(taskId);
+      return {
+        status: 'completed',
+        output,
+        checkpointId: checkpoint.id,
+      };
+    }
+
+    const replay = await this.prepareReplay(taskId, checkpoint);
+    if (replay.status === 'blocked') {
+      this.emitEvent({
+        type: 'error',
+        error: { name: 'TaskBlockedError', message: replay.reason },
+        timestamp: Date.now(),
+      });
+      return replay;
+    }
+
+    return this.executeTaskTurn(context, task ?? null, '', {
+      appendTaskPrompt: false,
+      startIteration: context.iteration,
+      resumeToolCalls: replay.toolCalls,
+      maxIterations: Math.min(this.config.maxIterations ?? 150, 10),
+      pauseOnBudget: true,
+      isResume: true,
+    });
   }
 
   /**
@@ -467,7 +590,10 @@ export class PlainAgent extends EventEmitter {
       // 保存消息到存储（保存完整版本，不是压缩版本）
       if (this.storage && newMessages.length > 0) {
         for (const msg of newMessages) {
+          // Keep the legacy session transcript for CLI/Desktop display,
+          // and also write the isolated task transcript for recovery.
           await this.storage.saveMessage(this.sessionId, msg);
+          await this.storage.saveMessage(this.sessionId, msg, id);
         }
       }
 
@@ -583,6 +709,11 @@ export class PlainAgent extends EventEmitter {
     return Array.from(this.taskControllers.keys());
   }
 
+  /** Resume persisted direct children before replaying their parent task. */
+  async recoverPendingSubagents(parentTaskId: string): Promise<string[]> {
+    return this.subagentRuntime?.recoverPending(parentTaskId) ?? [];
+  }
+
   /**
    * 获取当前会话 ID
    *
@@ -620,6 +751,301 @@ export class PlainAgent extends EventEmitter {
     }
     // 如果有压缩缓存，返回压缩版本；否则返回完整版本
     return [...(this.compressedMessages || this.fullMessages)];
+  }
+
+  private getHistoryMessages(taskId?: string): ChatMessage[] {
+    if (taskId) {
+      return this.taskContexts.get(taskId)?.messages ?? this.fullMessages;
+    }
+    return this.fullMessages;
+  }
+
+  private getTaskStore(): TaskStore | undefined {
+    return this.config.taskStore;
+  }
+
+  private async loadTaskContext(taskId: string): Promise<TaskExecutionContext> {
+    const existing = this.taskContexts.get(taskId);
+    if (existing) return existing;
+
+    const stored = this.storage
+      ? await this.storage.loadMessages(this.sessionId, taskId)
+      : [];
+    const messages = stored.length > 0 && stored[0].role === 'system'
+      ? stored
+      : [{ role: 'system' as const, content: this.systemPrompt }, ...stored];
+    const task = await this.getTaskStore()?.getTask(taskId);
+    const context: TaskExecutionContext = {
+      taskId,
+      messages,
+      iteration: 0,
+      checkpointId: task?.checkpointId,
+    };
+    const checkpoint = task?.checkpointId
+      ? await this.getTaskStore()?.getCheckpoint(task.checkpointId)
+      : undefined;
+    if (checkpoint) context.iteration = checkpoint.iteration;
+    this.taskContexts.set(taskId, context);
+    return context;
+  }
+
+  private async executeTaskTurn(
+    context: TaskExecutionContext,
+    task: Awaited<ReturnType<TaskStore['getTask']>>,
+    prompt: string,
+    options: AgentLoopOptions & { maxIterations: number },
+  ): Promise<AgentTurnResult> {
+    const abortController = new AbortController();
+    this.taskControllers.set(context.taskId, abortController);
+    const skills = discoverSkills(process.cwd());
+    const ctx: ToolContext = {
+      signal: abortController.signal,
+      sessionId: this.sessionId,
+      taskId: context.taskId,
+      emitEvent: (event: AgentEvent) => this.emitEvent(event),
+      storage: this.storage || undefined,
+      permissionCheck: async (tool, args) => this.checkPermission(tool, args),
+      jobs: this.jobs,
+      skills,
+      subagentRuntime: this.subagentRuntime,
+    };
+    const taskStore = this.getTaskStore();
+    try {
+      await taskStore?.appendEvent(context.taskId, options.isResume
+        ? 'resume-started'
+        : 'turn-started', {
+        iteration: context.iteration,
+        checkpointId: context.checkpointId,
+      });
+    } catch (error) {
+      this.taskControllers.delete(context.taskId);
+      throw error;
+    }
+
+    const persistMessage = async (message: ChatMessage): Promise<void> => {
+      if (message.role !== 'system') {
+        if (this.storage) {
+          // Session history remains the user-visible aggregate history.
+          await this.storage.saveMessage(this.sessionId, message);
+          await this.storage.saveMessage(this.sessionId, message, context.taskId);
+        }
+      }
+      context.messages.push(message);
+      await taskStore?.appendEvent(context.taskId, 'message-persisted', {
+        role: message.role,
+        toolCallId: message.tool_call_id,
+        cursor: context.messages.filter(item => item.role !== 'system').length,
+      });
+    };
+
+    const persistCheckpoint = async (boundary: AgentLoopBoundary): Promise<void> => {
+      context.iteration = boundary.iteration;
+      if (!taskStore) return;
+      const latest = await taskStore.getTask(context.taskId);
+      const checkpoint: TaskCheckpoint = {
+        id: randomUUID(),
+        taskId: context.taskId,
+        attempt: latest?.attempt ?? task?.attempt ?? 0,
+        iteration: boundary.iteration,
+        transcriptCursor: context.messages.filter(item => item.role !== 'system').length,
+        state: {
+          phase: boundary.phase,
+          nextAction: boundary.nextAction,
+          pendingChildIds: [],
+          pendingJobIds: [],
+          pendingToolCalls: boundary.pendingToolCalls,
+        },
+        summary: boundary.phase === 'after_llm'
+          ? 'LLM response persisted; tool batch pending'
+          : 'Tool batch persisted; ready for next model turn',
+        createdAt: Date.now(),
+      };
+      const committed = await taskStore.commitCheckpoint(
+        context.taskId,
+        checkpoint,
+        {
+          type: 'checkpoint-created',
+          data: {
+            checkpointId: checkpoint.id,
+            iteration: checkpoint.iteration,
+            phase: checkpoint.state.phase,
+          },
+        },
+        latest?.leaseOwner && latest.attempt !== undefined
+          ? { workerId: latest.leaseOwner, attempt: latest.attempt }
+          : undefined,
+      );
+      if (!committed) {
+        throw new Error(`Could not commit checkpoint for task ${context.taskId}`);
+      }
+      context.checkpointId = checkpoint.id;
+    };
+
+    try {
+      let messagesToSend = [...context.messages];
+      if (this.historyManager.shouldCompress(context.messages)) {
+        const compressed = await this.historyManager.compress(
+          context.messages,
+          this.config.llm,
+          abortController.signal,
+        );
+        messagesToSend = compressed.compressed;
+        this.emitEvent({
+          type: 'compression',
+          level: compressed.level as 1 | 2 | 3,
+          tokensBefore: compressed.health.tokenUsage,
+          tokensAfter: this.historyManager.getTokenUsage(messagesToSend).tokens,
+          timestamp: Date.now(),
+        });
+      }
+      const catalog = skillsCatalogPrompt(skills);
+      if (catalog) {
+        const systemIndex = messagesToSend.findIndex(message => message.role === 'system');
+        if (systemIndex >= 0) {
+          messagesToSend = messagesToSend.map((message, index) =>
+            index === systemIndex
+              ? { ...message, content: `${message.content ?? ''}\n${catalog}` }
+              : message,
+          );
+        }
+      }
+
+      const result = await agentLoop(
+        prompt,
+        messagesToSend,
+        ctx,
+        this.config.tools,
+        this.config.llm,
+        options.maxIterations,
+        {
+          ...options,
+          onMessage: persistMessage,
+          onBoundary: persistCheckpoint,
+          onToolCallStart: async (call, tool, args) => {
+            await taskStore?.appendEvent(context.taskId, 'tool-call-started', {
+              callId: call.id,
+              tool,
+              args,
+            });
+          },
+          onToolCallComplete: async (call, tool, output) => {
+            await taskStore?.appendEvent(context.taskId, 'tool-call-completed', {
+              callId: call.id,
+              tool,
+              result: output,
+            });
+          },
+        },
+      );
+      context.iteration = result.iteration;
+      if (result.stopReason === 'completed') {
+        this.emitTaskEnded(context.taskId);
+        return {
+          status: 'completed',
+          output: result.result,
+          checkpointId: context.checkpointId,
+        };
+      }
+      if (result.stopReason === 'paused') {
+        await taskStore?.appendEvent(context.taskId, 'turn-paused', {
+          checkpointId: context.checkpointId,
+          iteration: result.iteration,
+        });
+        return {
+          status: 'paused',
+          checkpointId: context.checkpointId,
+        };
+      }
+      if (result.stopReason === 'stopped') {
+        return { status: 'failed', reason: 'stopped' };
+      }
+      return { status: 'failed', reason: result.result };
+    } catch (error) {
+      const serialized = this.serializeError(error);
+      await taskStore?.appendEvent(context.taskId, 'turn-failed', serialized);
+      return { status: 'failed', error: serialized };
+    } finally {
+      this.taskControllers.delete(context.taskId);
+    }
+  }
+
+  private emitTaskStarted(taskId: string, task: string): void {
+    this.emitEvent({
+      type: 'task-start',
+      taskId,
+      task,
+      timestamp: Date.now(),
+    });
+  }
+
+  private emitTaskEnded(taskId: string): void {
+    this.emitEvent({
+      type: 'task-end',
+      taskId,
+      timestamp: Date.now(),
+    });
+  }
+
+  private async prepareReplay(
+    taskId: string,
+    checkpoint: TaskCheckpoint | null | undefined,
+  ): Promise<{ status: 'ready'; toolCalls: import('./types').ToolCall[] } | { status: 'blocked'; reason: string }> {
+    const pending = checkpoint?.state.pendingToolCalls ?? [];
+    if (pending.length === 0) return { status: 'ready', toolCalls: [] };
+    const store = this.getTaskStore();
+    if (!store) return { status: 'ready', toolCalls: pending };
+    const events = await store.listEvents(taskId);
+    const completed = new Map<string, string>();
+    const started = new Map<string, { tool: string }>();
+    for (const event of events) {
+      const data = event.data as Record<string, unknown>;
+      if (event.type === 'tool-call-started' && typeof data.callId === 'string') {
+        started.set(data.callId, { tool: String(data.tool ?? '') });
+      }
+      if (event.type === 'tool-call-completed' && typeof data.callId === 'string') {
+        completed.set(data.callId, String(data.result ?? ''));
+      }
+    }
+
+    const context = this.taskContexts.get(taskId);
+    if (!context) return { status: 'ready', toolCalls: pending };
+    for (const call of pending) {
+      if (!completed.has(call.id)) continue;
+      if (context.messages.some(message => message.tool_call_id === call.id)) continue;
+      const toolMessage: ChatMessage = {
+        role: 'tool',
+        tool_call_id: call.id,
+        content: completed.get(call.id) ?? '',
+      };
+      if (this.storage) {
+        await this.storage.saveMessage(this.sessionId, toolMessage);
+        await this.storage.saveMessage(this.sessionId, toolMessage, taskId);
+      }
+      context.messages.push(toolMessage);
+    }
+
+    const replayable = [];
+    for (const call of pending) {
+      if (completed.has(call.id)) continue;
+      const tool = this.config.tools.find(item => item.name === call.function.name);
+      const replayPolicy = tool?.meta?.replay ?? (tool?.meta?.readonly ? 'safe' : 'unsafe');
+      if (started.has(call.id) && replayPolicy === 'unsafe') {
+        const reason = `Tool ${call.function.name} started before the crash and its result is unknown`;
+        await store.appendEvent(taskId, 'task-blocked', {
+          reason: 'unknown-tool-outcome',
+          callId: call.id,
+          tool: call.function.name,
+        });
+        return { status: 'blocked', reason };
+      }
+      replayable.push(call);
+      await store.appendEvent(taskId, 'resume-replayed', {
+        callId: call.id,
+        tool: call.function.name,
+        policy: replayPolicy,
+      });
+    }
+    return { status: 'ready', toolCalls: replayable };
   }
 
   /**

@@ -106,6 +106,13 @@ export interface ToolMeta {
   readonly?: boolean;      // 只读操作（可并发）
   concurrent?: boolean;     // 是否支持并发执行
   dangerous?: boolean;      // 危险操作（需要权限确认）
+  /**
+   * Recovery policy for an interrupted tool call.
+   * - safe: read-only or otherwise safe to retry
+   * - idempotent: retryable when the caller supplies the same call identity
+   * - unsafe: the outcome may be unknown after a crash
+   */
+  replay?: 'safe' | 'idempotent' | 'unsafe';
   tags?: string[];          // 工具标签
 }
 
@@ -114,6 +121,8 @@ export interface ToolContext {
   sessionId: string;
   /** Current persisted task ID, used to link child tasks. */
   taskId?: string;
+  /** Stable identity of the currently executing model tool call. */
+  toolCallId?: string;
   emitEvent: (event: AgentEvent) => void;
   storage?: SessionStorage;
   permissionCheck?: (tool: Tool, args: any) => Promise<boolean>;
@@ -130,8 +139,12 @@ export interface ToolContext {
 // ============ 存储接口（依赖倒置）============
 
 export interface SessionStorage {
-  saveMessage(sessionId: string, message: ChatMessage): Promise<void>;
-  loadMessages(sessionId: string): Promise<ChatMessage[]>;
+  /**
+   * taskId omitted = interactive session history.
+   * taskId present = durable transcript for one long-running task.
+   */
+  saveMessage(sessionId: string, message: ChatMessage, taskId?: string): Promise<void>;
+  loadMessages(sessionId: string, taskId?: string): Promise<ChatMessage[]>;
   saveEvent(sessionId: string, event: AgentEvent): Promise<void>;
   loadEvents(sessionId: string): Promise<AgentEvent[]>;
   createSession(sessionId: string, title: string): Promise<void>;
@@ -228,7 +241,8 @@ export interface HistoryManagementConfig {
 export interface AgentLoopResult {
   result: string;
   messages: ChatMessage[];
-  stopReason: 'completed' | 'stopped' | 'max_iterations' | 'error';
+  stopReason: 'completed' | 'stopped' | 'max_iterations' | 'paused' | 'error';
+  iteration: number;
 }
 
 // ============ 权限相关 ============

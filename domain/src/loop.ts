@@ -43,6 +43,34 @@ function planBatches(calls: ToolCall[], tools: Tool[]): ToolCall[][] {
   return batches;
 }
 
+export interface AgentLoopBoundary {
+  phase: 'after_llm' | 'after_tools';
+  iteration: number;
+  nextAction: 'continue' | 'complete';
+  pendingToolCalls: ToolCall[];
+}
+
+export interface AgentLoopOptions {
+  /** Append the user prompt before the first model call. */
+  appendTaskPrompt?: boolean;
+  /** Absolute iteration number to continue from. */
+  startIteration?: number;
+  /** Tool calls from an after_llm checkpoint that still need execution. */
+  resumeToolCalls?: ToolCall[];
+  /** Legacy submit() keeps its historical max-iteration result when false. */
+  pauseOnBudget?: boolean;
+  /** Distinguish a resumed turn from the first turn for task events. */
+  isResume?: boolean;
+  onMessage?: (message: ChatMessage) => void | Promise<void>;
+  onBoundary?: (boundary: AgentLoopBoundary) => void | Promise<void>;
+  onToolCallStart?: (call: ToolCall, toolName: string, args: unknown) => void | Promise<void>;
+  onToolCallComplete?: (
+    call: ToolCall,
+    toolName: string,
+    result: string,
+  ) => void | Promise<void>;
+}
+
 /**
  * Agent 主循环：ReAct 范式
  * LLM → tool call → tool result → LLM ... 直到完成
@@ -53,28 +81,34 @@ export async function agentLoop(
   ctx: ToolContext,
   tools: Tool[],
   llmConfig: LLMConfig,
-  maxIterations: number = 150
+  maxIterations: number = 150,
+  options: AgentLoopOptions = {},
 ): Promise<AgentLoopResult> {
 
-  // 添加用户消息
-  const userMsg: ChatMessage = {
-    role: 'user',
-    content: task,
-  };
-  messages.push(userMsg);
+  const appendTaskPrompt = options.appendTaskPrompt ?? true;
+  if (appendTaskPrompt) {
+    // 添加用户消息
+    const userMsg: ChatMessage = {
+      role: 'user',
+      content: task,
+    };
+    messages.push(userMsg);
+    await options.onMessage?.(userMsg);
 
-  // 发射用户事件
-  ctx.emitEvent({
-    type: 'user',
-    message: task,
-    timestamp: Date.now(),
-  });
+    // 发射用户事件
+    ctx.emitEvent({
+      type: 'user',
+      message: task,
+      timestamp: Date.now(),
+    });
+  }
 
   // 构建工具 schema
   const toolSchemas = tools.map(t => t.schema);
 
   // ReAct 主循环
   for (let i = 0; i < maxIterations; i++) {
+    const iteration = (options.startIteration ?? 0) + i + 1;
     // 检查中断信号
     if (ctx.signal.aborted) {
       ctx.emitEvent({
@@ -85,6 +119,7 @@ export async function agentLoop(
         result: '[stopped]',
         messages,
         stopReason: 'stopped',
+        iteration,
       };
     }
 
@@ -104,80 +139,101 @@ export async function agentLoop(
 
     let responseContent = '';
     let responseToolCalls: ToolCall[] | undefined;
-    try {
-      // 流式调用 LLM，边接收边发射文本增量
-      const accumulator = new ToolCallAccumulator();
-      for await (const chunk of streamLLM(llmConfig, messages, toolSchemas, ctx.signal)) {
-        if (chunk.text) {
-          responseContent += chunk.text;
+    let resumedToolBatch = false;
+    if (i === 0 && options.resumeToolCalls && options.resumeToolCalls.length > 0) {
+      responseToolCalls = options.resumeToolCalls;
+      resumedToolBatch = true;
+    } else {
+      try {
+        // 流式调用 LLM，边接收边发射文本增量
+        const accumulator = new ToolCallAccumulator();
+        for await (const chunk of streamLLM(llmConfig, messages, toolSchemas, ctx.signal)) {
+          if (chunk.text) {
+            responseContent += chunk.text;
+            ctx.emitEvent({
+              type: 'text_delta',
+              delta: chunk.text,
+              timestamp: Date.now(),
+            });
+          } else if (chunk.toolCall) {
+            accumulator.add(chunk);
+          }
+        }
+
+        const toolCalls = accumulator.getToolCalls();
+        if (toolCalls.length > 0) {
+          responseToolCalls = toolCalls as ToolCall[];
+        }
+      } catch (error) {
+        // LLM 调用失败
+        if (error instanceof Error && error.name === 'AbortError') {
           ctx.emitEvent({
-            type: 'text_delta',
-            delta: chunk.text,
+            type: 'stopped',
             timestamp: Date.now(),
           });
-        } else if (chunk.toolCall) {
-          accumulator.add(chunk);
+          return {
+            result: '[stopped]',
+            messages,
+            stopReason: 'stopped',
+            iteration,
+          };
         }
+        throw error;
       }
-
-      const toolCalls = accumulator.getToolCalls();
-      if (toolCalls.length > 0) {
-        responseToolCalls = toolCalls as ToolCall[];
-      }
-    } catch (error) {
-      // LLM 调用失败
-      if (error instanceof Error && error.name === 'AbortError') {
-        ctx.emitEvent({
-          type: 'stopped',
-          timestamp: Date.now(),
-        });
-        return {
-          result: '[stopped]',
-          messages,
-          stopReason: 'stopped',
-        };
-      }
-      throw error;
     }
 
-    const response = {
-      role: 'assistant' as const,
-      content: responseContent,
-      tool_calls: responseToolCalls,
-    };
+    if (!resumedToolBatch) {
+      const response = {
+        role: 'assistant' as const,
+        content: responseContent,
+        tool_calls: responseToolCalls,
+      };
 
-    // 将 LLM 响应添加到消息历史
-    const assistantMsg: ChatMessage = {
-      role: 'assistant',
-      content: response.content,
-      tool_calls: response.tool_calls,
-    };
-    messages.push(assistantMsg);
+      // 将 LLM 响应添加到消息历史
+      const assistantMsg: ChatMessage = {
+        role: 'assistant',
+        content: response.content,
+        tool_calls: response.tool_calls,
+      };
+      messages.push(assistantMsg);
+      await options.onMessage?.(assistantMsg);
+
+      await options.onBoundary?.({
+        phase: 'after_llm',
+        iteration,
+        nextAction: responseToolCalls && responseToolCalls.length > 0 ? 'continue' : 'complete',
+        pendingToolCalls: responseToolCalls ?? [],
+      });
+    }
 
     // 处理响应
-    if (response.tool_calls && response.tool_calls.length > 0) {
+    if (responseToolCalls && responseToolCalls.length > 0) {
       // 有工具调用：按批次执行（批内并发、批间串行），结果按 tool_calls 原顺序入历史
       const results = new Map<string, string>();
       let stopped = false;
 
-      for (const batch of planBatches(response.tool_calls, tools)) {
+      for (const batch of planBatches(responseToolCalls, tools)) {
         // 每批执行前检查取消状态
         if (ctx.signal.aborted) {
           stopped = true;
           break;
         }
-        const batchResults = await Promise.all(batch.map(call => executeToolCall(call, tools, ctx)));
+        const batchResults = await Promise.all(batch.map(call =>
+          executeToolCall(call, tools, ctx, options)
+        ));
         batch.forEach((call, j) => results.set(call.id, batchResults[j]));
       }
 
       // 每个 tool_call 都必须有对应的 tool 消息，否则下次请求会被 API 拒绝；
       // 中断时未执行的调用补"已取消"
-      for (const call of response.tool_calls) {
-        messages.push({
+      for (const call of responseToolCalls) {
+        const toolMessage = {
           role: 'tool',
           tool_call_id: call.id,
           content: results.get(call.id) ?? CANCELLED_RESULT,
-        });
+        } satisfies ChatMessage;
+        messages.push(toolMessage);
+        await options.onMessage?.(toolMessage);
       }
 
       if (stopped) {
@@ -189,11 +245,19 @@ export async function agentLoop(
           result: '[stopped]',
           messages,
           stopReason: 'stopped',
+          iteration,
         };
       }
+
+      await options.onBoundary?.({
+        phase: 'after_tools',
+        iteration,
+        nextAction: 'continue',
+        pendingToolCalls: [],
+      });
     } else {
       // 没有工具调用：认为是最终回答
-      const answer = response.content || '';
+      const answer = responseContent || '';
 
       ctx.emitEvent({
         type: 'assistant',
@@ -211,13 +275,22 @@ export async function agentLoop(
         result: answer,
         messages,
         stopReason: 'completed',
+        iteration,
+      };
+    }
+
+    if (i + 1 >= maxIterations && (options.pauseOnBudget ?? false)) {
+      return {
+        result: '',
+        messages,
+        stopReason: 'paused',
+        iteration,
       };
     }
   }
 
   // 达到最大迭代次数
   const finalMessage = `达到最大迭代次数 ${maxIterations}，任务未完成`;
-
   ctx.emitEvent({
     type: 'assistant',
     message: finalMessage,
@@ -228,6 +301,7 @@ export async function agentLoop(
     result: finalMessage,
     messages,
     stopReason: 'max_iterations',
+    iteration: (options.startIteration ?? 0) + maxIterations,
   };
 }
 
@@ -237,7 +311,8 @@ export async function agentLoop(
 async function executeToolCall(
   call: ToolCall,
   tools: Tool[],
-  ctx: ToolContext
+  ctx: ToolContext,
+  options: AgentLoopOptions,
 ): Promise<string> {
   const startTime = Date.now();
   const callId = call.id;
@@ -290,14 +365,21 @@ async function executeToolCall(
     callId,
     timestamp: Date.now(),
   });
+  await options.onToolCallStart?.(call, tool.name, args);
 
   // 执行工具
   try {
-    return emitResult(tool.name, await tool.handler(args, ctx));
+    const result = await tool.handler(args, {
+      ...ctx,
+      toolCallId: call.id,
+    });
+    await options.onToolCallComplete?.(call, tool.name, result);
+    return emitResult(tool.name, result);
   } catch (error) {
     const errorMsg = error instanceof Error
       ? `工具执行失败: ${error.message}`
       : `工具执行失败: ${String(error)}`;
+    await options.onToolCallComplete?.(call, tool.name, errorMsg);
     return emitResult(tool.name, errorMsg);
   }
 }

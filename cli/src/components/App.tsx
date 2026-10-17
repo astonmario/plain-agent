@@ -420,6 +420,7 @@ export default function App(props: AppProps) {
         if (err instanceof Error && err.name !== 'AbortError') {
           addMessage(MessageType.ERROR, `提交失败: ${err.message}`);
         }
+        setIsProcessing(false);
       });
     },
     [addMessage, props.submitTask],

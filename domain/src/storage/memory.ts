@@ -30,12 +30,17 @@ export class MemoryStorage implements SessionStorage {
     }
   }
 
-  async saveMessage(sessionId: string, message: ChatMessage): Promise<void> {
+  private messageKey(sessionId: string, taskId?: string): string {
+    return `${sessionId}\u0000${taskId ?? ''}`;
+  }
+
+  async saveMessage(sessionId: string, message: ChatMessage, taskId?: string): Promise<void> {
     await this.createSession(sessionId, 'Untitled');
 
-    const msgs = this.messages.get(sessionId) || [];
+    const key = this.messageKey(sessionId, taskId);
+    const msgs = this.messages.get(key) || [];
     msgs.push(message);
-    this.messages.set(sessionId, msgs);
+    this.messages.set(key, msgs);
 
     // 更新会话时间
     const session = this.sessions.get(sessionId);
@@ -44,8 +49,8 @@ export class MemoryStorage implements SessionStorage {
     }
   }
 
-  async loadMessages(sessionId: string): Promise<ChatMessage[]> {
-    return this.messages.get(sessionId) || [];
+  async loadMessages(sessionId: string, taskId?: string): Promise<ChatMessage[]> {
+    return this.messages.get(this.messageKey(sessionId, taskId)) || [];
   }
 
   async saveEvent(sessionId: string, event: AgentEvent): Promise<void> {
@@ -83,12 +88,16 @@ export class MemoryStorage implements SessionStorage {
     }
     for (const childSession of childSessions) {
       this.sessions.delete(childSession);
-      this.messages.delete(childSession);
+      for (const key of this.messages.keys()) {
+        if (key.startsWith(`${childSession}\u0000`)) this.messages.delete(key);
+      }
       this.events.delete(childSession);
       this.jobs.delete(childSession);
     }
     this.sessions.delete(sessionId);
-    this.messages.delete(sessionId);
+    for (const key of this.messages.keys()) {
+      if (key.startsWith(`${sessionId}\u0000`)) this.messages.delete(key);
+    }
     this.events.delete(sessionId);
     this.jobs.delete(sessionId);
     await this.taskStore.deleteTasksBySession(sessionId);

@@ -3,6 +3,7 @@
  */
 
 export { PlainAgent } from './agent';
+export type { AgentTurnResult } from './agent';
 export { agentLoop } from './loop';
 export { callLLM, streamLLM, ToolCallAccumulator } from './llm';
 export { SQLiteStorage, MemoryStorage } from './storage';
@@ -109,6 +110,9 @@ export type {
   TaskStore,
   TaskRecord,
   TaskEventRecord,
+  TaskCheckpoint,
+  TaskCheckpointPhase,
+  TaskCheckpointAction,
   TaskStatus,
   TaskOrchestratorConfig,
   TaskRecoveryResult,

@@ -13,7 +13,7 @@ import type { Tool, ToolContext, ChatMessage } from '../types.js';
  * @returns Tool
  */
 export function createHistoryLookupTool(
-  getFullMessages: () => ChatMessage[]
+  getFullMessages: (taskId?: string) => ChatMessage[]
 ): Tool {
   return {
     name: 'lookup_history',
@@ -46,7 +46,7 @@ export function createHistoryLookupTool(
     handler: async (args, ctx: ToolContext) => {
       const { tool_name, search_text, max_results = 3 } = args;
 
-      const fullMessages = getFullMessages();
+      const fullMessages = getFullMessages(ctx.taskId);
       const results: Array<{ index: number; preview: string; full: string }> = [];
 
       // 遍历历史消息，查找匹配的工具输出
@@ -110,7 +110,7 @@ export function createHistoryLookupTool(
  * 创建历史搜索工具（更灵活的搜索）
  */
 export function createHistorySearchTool(
-  getFullMessages: () => ChatMessage[]
+  getFullMessages: (taskId?: string) => ChatMessage[]
 ): Tool {
   return {
     name: 'search_history',
@@ -144,7 +144,7 @@ export function createHistorySearchTool(
     handler: async (args, ctx: ToolContext) => {
       const { query, message_type = 'all', max_results = 5 } = args;
 
-      const fullMessages = getFullMessages();
+      const fullMessages = getFullMessages(ctx.taskId);
       const results: Array<{ index: number; role: string; content: string }> = [];
 
       for (let i = 0; i < fullMessages.length; i++) {

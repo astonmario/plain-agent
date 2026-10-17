@@ -51,6 +51,22 @@ class FakeAgent extends EventEmitter {
   }
 }
 
+class BlockedAgent extends EventEmitter {
+  async runTurn(): Promise<{ status: 'blocked'; reason: string }> {
+    return { status: 'blocked', reason: 'manual confirmation required' };
+  }
+
+  async resume(): Promise<{ status: 'blocked'; reason: string }> {
+    return { status: 'blocked', reason: 'manual confirmation required' };
+  }
+
+  async submit(): Promise<string> {
+    throw new Error('blocked agent should use durable turn API');
+  }
+
+  stop(): void {}
+}
+
 async function waitForTask(storage: MemoryStorage, count = 1): Promise<string> {
   for (let i = 0; i < 50; i++) {
     const tasks = await storage.getTaskStore().listTasks();
@@ -134,10 +150,27 @@ async function testCancellation(): Promise<void> {
     'cancelled task remains cancelled');
 }
 
+async function testBlockedReleasesLease(): Promise<void> {
+  const storage = new MemoryStorage();
+  const orchestrator = new TaskOrchestrator({
+    taskStore: storage.getTaskStore(),
+    sessionStorage: storage,
+    createAgent: () => new BlockedAgent() as unknown as PlainAgent,
+  });
+
+  const output = await orchestrator.run('session-blocked', 'requires confirmation');
+  const task = (await storage.getTaskStore().listTasks())[0];
+  assert(output === 'manual confirmation required', 'blocked task returns its reason');
+  assert(task.status === 'blocked', 'blocked turn transitions the task to blocked');
+  assert(task.leaseOwner === undefined && task.leaseUntil === undefined,
+    'blocked task releases its worker lease');
+}
+
 async function main(): Promise<void> {
   await testCompletionAndEvents();
   await testRetry();
   await testCancellation();
+  await testBlockedReleasesLease();
   console.log('task orchestrator tests passed');
 }
 

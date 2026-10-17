@@ -1,9 +1,10 @@
 import type { TaskEventRecord, TaskRecord, TaskStatus } from './types';
+import type { TaskCheckpoint } from './checkpoints';
 import { canTransition, normalizeTaskStatus } from './transitions';
 import type { TaskStore, TaskTerminalStatus } from './store';
 
 export const DEFAULT_TASK_LEASE_MS = 60_000;
-const CLAIMABLE_STATUSES = ['queued', 'running', 'waiting_child', 'waiting_process'] as const;
+const CLAIMABLE_STATUSES = ['queued', 'running'] as const;
 
 function encode(value: unknown): string {
   const encoded = JSON.stringify(value);
@@ -51,6 +52,18 @@ export class SQLiteTaskStore implements TaskStore {
         FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
       );
 
+      CREATE TABLE IF NOT EXISTS task_checkpoints (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        attempt INTEGER NOT NULL,
+        iteration INTEGER NOT NULL,
+        transcript_cursor INTEGER NOT NULL,
+        state_json TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+      );
+
       CREATE INDEX IF NOT EXISTS idx_tasks_claimable
         ON tasks(status, lease_until, updated_at);
       CREATE INDEX IF NOT EXISTS idx_tasks_session
@@ -59,6 +72,8 @@ export class SQLiteTaskStore implements TaskStore {
         ON tasks(parent_id, created_at);
       CREATE INDEX IF NOT EXISTS idx_task_events_task
         ON task_events(task_id, seq);
+      CREATE INDEX IF NOT EXISTS idx_task_checkpoints_task
+        ON task_checkpoints(task_id, created_at);
     `);
     this.ensureColumn('delegation_json', 'TEXT');
     this.ensureColumn('depth', 'INTEGER');
@@ -224,6 +239,44 @@ export class SQLiteTaskStore implements TaskStore {
     result?: unknown,
   ): Promise<boolean> {
     return this.updateAttemptStatus(taskId, workerId, attempt, status, result);
+  }
+
+  async blockAttempt(
+    taskId: string,
+    workerId: string,
+    attempt: number,
+    error?: string,
+  ): Promise<boolean> {
+    const now = Date.now();
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const changed = this.db.prepare(`
+        UPDATE tasks
+        SET status = 'blocked',
+            error = COALESCE(?, error),
+            lease_owner = NULL,
+            lease_until = NULL,
+            updated_at = ?
+        WHERE id = ?
+          AND status = 'running'
+          AND lease_owner = ?
+          AND attempt = ?
+          AND lease_until > ?
+      `).run(error ?? null, now, taskId, workerId, attempt, now) as any;
+      if (Number(changed?.changes ?? 0) !== 1) {
+        this.db.exec('ROLLBACK');
+        return false;
+      }
+      this.insertEvent(taskId, 'status-changed', {
+        from: 'running',
+        to: 'blocked',
+      }, now);
+      this.db.exec('COMMIT');
+      return true;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   async retryAttempt(
@@ -528,6 +581,123 @@ export class SQLiteTaskStore implements TaskStore {
     }
   }
 
+  async listRecoverableTasks(now = Date.now()): Promise<TaskRecord[]> {
+    const rows = this.db.prepare(`
+      SELECT * FROM tasks
+      WHERE status = 'queued'
+         OR (
+           status = 'running'
+           AND lease_until IS NOT NULL
+           AND lease_until <= ?
+         )
+      ORDER BY created_at ASC
+    `).all(now) as any[];
+    return rows.map(row => this.fromRow(row));
+  }
+
+  async listChildren(parentId: string): Promise<TaskRecord[]> {
+    return this.listTasks({ parentId });
+  }
+
+  async recoverTaskTree(rootId: string, now = Date.now()): Promise<TaskRecord[]> {
+    await this.recoverExpiredTasks(now);
+    return this.listTasks({ rootId });
+  }
+
+  async createCheckpoint(checkpoint: TaskCheckpoint): Promise<void> {
+    this.db.prepare(`
+      INSERT INTO task_checkpoints (
+        id, task_id, attempt, iteration, transcript_cursor,
+        state_json, summary, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      checkpoint.id,
+      checkpoint.taskId,
+      checkpoint.attempt,
+      checkpoint.iteration,
+      checkpoint.transcriptCursor,
+      encode(checkpoint.state),
+      checkpoint.summary,
+      checkpoint.createdAt,
+    );
+  }
+
+  async getCheckpoint(checkpointId: string): Promise<TaskCheckpoint | null> {
+    const row = this.db.prepare(`
+      SELECT * FROM task_checkpoints WHERE id = ?
+    `).get(checkpointId) as any;
+    return row ? this.checkpointFromRow(row) : null;
+  }
+
+  async getLatestCheckpoint(taskId: string): Promise<TaskCheckpoint | null> {
+    const row = this.db.prepare(`
+      SELECT * FROM task_checkpoints
+      WHERE task_id = ?
+      ORDER BY created_at DESC
+      LIMIT 1
+    `).get(taskId) as any;
+    return row ? this.checkpointFromRow(row) : null;
+  }
+
+  async commitCheckpoint(
+    taskId: string,
+    checkpoint: TaskCheckpoint,
+    event: { type: string; data: unknown },
+    guard?: { workerId?: string; attempt?: number },
+  ): Promise<boolean> {
+    if (checkpoint.taskId !== taskId) return false;
+    const now = Date.now();
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const task = this.db.prepare(`SELECT * FROM tasks WHERE id = ?`).get(taskId) as any;
+      if (!task) {
+        this.db.exec('ROLLBACK');
+        return false;
+      }
+      if (
+        guard?.attempt !== undefined &&
+        (task.attempt !== guard.attempt ||
+          task.status !== 'running' ||
+          (guard.workerId !== undefined && task.lease_owner !== guard.workerId) ||
+          task.lease_until === null ||
+          task.lease_until <= now)
+      ) {
+        this.db.exec('ROLLBACK');
+        return false;
+      }
+      this.db.prepare(`
+        INSERT INTO task_checkpoints (
+          id, task_id, attempt, iteration, transcript_cursor,
+          state_json, summary, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        checkpoint.id,
+        checkpoint.taskId,
+        checkpoint.attempt,
+        checkpoint.iteration,
+        checkpoint.transcriptCursor,
+        encode(checkpoint.state),
+        checkpoint.summary,
+        checkpoint.createdAt,
+      );
+      const updated = this.db.prepare(`
+        UPDATE tasks
+        SET checkpoint_id = ?, updated_at = ?
+        WHERE id = ?
+      `).run(checkpoint.id, now, taskId) as any;
+      if (Number(updated?.changes ?? 0) !== 1) {
+        this.db.exec('ROLLBACK');
+        return false;
+      }
+      this.insertEvent(taskId, event.type, event.data, now);
+      this.db.exec('COMMIT');
+      return true;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
   async appendEvent(taskId: string, type: string, data: unknown): Promise<TaskEventRecord> {
     const createdAt = Date.now();
     return this.insertEvent(taskId, type, data, createdAt);
@@ -601,6 +771,19 @@ export class SQLiteTaskStore implements TaskStore {
       startedAt: row.started_at ?? undefined,
       finishedAt: row.finished_at ?? undefined,
       updatedAt: row.updated_at,
+    };
+  }
+
+  private checkpointFromRow(row: any): TaskCheckpoint {
+    return {
+      id: row.id,
+      taskId: row.task_id,
+      attempt: row.attempt,
+      iteration: row.iteration,
+      transcriptCursor: row.transcript_cursor,
+      state: JSON.parse(row.state_json),
+      summary: row.summary,
+      createdAt: row.created_at,
     };
   }
 }

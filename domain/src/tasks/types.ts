@@ -6,6 +6,7 @@ export type TaskStatus =
   | 'waiting_child'
   | 'waiting_process'
   | 'waiting_user'
+  | 'blocked'
   | 'verifying'
   | 'paused'
   | 'completed'

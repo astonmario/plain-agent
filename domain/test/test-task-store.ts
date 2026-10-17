@@ -95,6 +95,18 @@ async function exerciseStore(
   assert((await store.getTask(task.id))?.error === 'expected failure',
     `${name}: failure result is persisted`);
 
+  const blocked = makeTask(sessionId);
+  await store.createTask(blocked);
+  const blockedClaim = await store.claimTask(blocked.id, 'worker-current');
+  assert(blockedClaim?.attempt === 1, `${name}: blocked task is claimed`);
+  assert(!(await store.blockAttempt(blocked.id, 'worker-stale', 1, 'stale')),
+    `${name}: stale worker cannot block a task`);
+  assert(await store.blockAttempt(blocked.id, 'worker-current', 1, 'manual review required'),
+    `${name}: current worker can block a task`);
+  const blockedRecord = await store.getTask(blocked.id);
+  assert(blockedRecord?.status === 'blocked' && blockedRecord.leaseOwner === undefined,
+    `${name}: blocking releases the lease`);
+
   const exhausted = makeTask(sessionId, {
     status: 'running',
     attempt: 1,

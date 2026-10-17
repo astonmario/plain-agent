@@ -1,4 +1,5 @@
 import type { TaskEventRecord, TaskRecord, TaskStatus } from './types';
+import type { TaskCheckpoint } from './checkpoints';
 import { canTransition, normalizeTaskStatus } from './transitions';
 import type { TaskStore, TaskTerminalStatus } from './store';
 
@@ -7,8 +8,6 @@ export const DEFAULT_TASK_LEASE_MS = 60_000;
 const CLAIMABLE: ReadonlySet<TaskStatus> = new Set([
   'queued',
   'running',
-  'waiting_child',
-  'waiting_process',
 ]);
 
 function clone<T>(value: T): T {
@@ -18,6 +17,7 @@ function clone<T>(value: T): T {
 export class MemoryTaskStore implements TaskStore {
   private tasks = new Map<string, TaskRecord>();
   private events = new Map<string, TaskEventRecord[]>();
+  private checkpoints = new Map<string, TaskCheckpoint>();
   private nextSeq = 1;
 
   async createTask(task: TaskRecord): Promise<void> {
@@ -144,6 +144,38 @@ export class MemoryTaskStore implements TaskStore {
       return false;
     }
     return this.updateTaskStatus(taskId, status, result);
+  }
+
+  async blockAttempt(
+    taskId: string,
+    workerId: string,
+    attempt: number,
+    error?: string,
+  ): Promise<boolean> {
+    const current = this.tasks.get(taskId);
+    const now = Date.now();
+    if (!current ||
+        current.status !== 'running' ||
+        current.leaseOwner !== workerId ||
+        current.leaseUntil === undefined ||
+        current.leaseUntil <= now ||
+        current.attempt !== attempt ||
+        !canTransition(current.status, 'blocked')) {
+      return false;
+    }
+    this.tasks.set(taskId, {
+      ...current,
+      status: 'blocked',
+      error: error ?? current.error,
+      leaseOwner: undefined,
+      leaseUntil: undefined,
+      updatedAt: now,
+    });
+    await this.appendEvent(taskId, 'status-changed', {
+      from: 'running',
+      to: 'blocked',
+    });
+    return true;
   }
 
   async retryAttempt(
@@ -302,6 +334,73 @@ export class MemoryTaskStore implements TaskStore {
     return count;
   }
 
+  async listRecoverableTasks(now = Date.now()): Promise<TaskRecord[]> {
+    return [...this.tasks.values()]
+      .filter(task =>
+        task.status === 'queued' ||
+        (task.status === 'running' &&
+          task.leaseUntil !== undefined &&
+          task.leaseUntil <= now),
+      )
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .map(clone);
+  }
+
+  async listChildren(parentId: string): Promise<TaskRecord[]> {
+    return this.listTasks({ parentId });
+  }
+
+  async recoverTaskTree(rootId: string, now = Date.now()): Promise<TaskRecord[]> {
+    await this.recoverExpiredTasks(now);
+    return this.listTasks({ rootId });
+  }
+
+  async createCheckpoint(checkpoint: TaskCheckpoint): Promise<void> {
+    if (!this.tasks.has(checkpoint.taskId)) {
+      throw new Error(`Task not found: ${checkpoint.taskId}`);
+    }
+    if (this.checkpoints.has(checkpoint.id)) {
+      throw new Error(`Checkpoint already exists: ${checkpoint.id}`);
+    }
+    this.checkpoints.set(checkpoint.id, clone(checkpoint));
+  }
+
+  async getCheckpoint(checkpointId: string): Promise<TaskCheckpoint | null> {
+    const checkpoint = this.checkpoints.get(checkpointId);
+    return checkpoint ? clone(checkpoint) : null;
+  }
+
+  async getLatestCheckpoint(taskId: string): Promise<TaskCheckpoint | null> {
+    const checkpoints = [...this.checkpoints.values()]
+      .filter(checkpoint => checkpoint.taskId === taskId)
+      .sort((a, b) => b.createdAt - a.createdAt);
+    return checkpoints[0] ? clone(checkpoints[0]) : null;
+  }
+
+  async commitCheckpoint(
+    taskId: string,
+    checkpoint: TaskCheckpoint,
+    event: { type: string; data: unknown },
+    guard?: { workerId?: string; attempt?: number },
+  ): Promise<boolean> {
+    const current = this.tasks.get(taskId);
+    if (!current || checkpoint.taskId !== taskId) return false;
+    if (
+      guard?.attempt !== undefined &&
+      (current.attempt !== guard.attempt ||
+        current.status !== 'running' ||
+        (guard.workerId !== undefined && current.leaseOwner !== guard.workerId) ||
+        current.leaseUntil === undefined ||
+        current.leaseUntil <= Date.now())
+    ) return false;
+    if (this.checkpoints.has(checkpoint.id)) return false;
+    this.checkpoints.set(checkpoint.id, clone(checkpoint));
+    current.checkpointId = checkpoint.id;
+    current.updatedAt = Date.now();
+    await this.appendEvent(taskId, event.type, event.data);
+    return true;
+  }
+
   async appendEvent(taskId: string, type: string, data: unknown): Promise<TaskEventRecord> {
     const event: TaskEventRecord = {
       seq: this.nextSeq++,
@@ -332,6 +431,9 @@ export class MemoryTaskStore implements TaskStore {
       if (task.sessionId === sessionId || rootIds.has(task.rootId)) {
         this.tasks.delete(task.id);
         this.events.delete(task.id);
+        for (const checkpoint of this.checkpoints.values()) {
+          if (checkpoint.taskId === task.id) this.checkpoints.delete(checkpoint.id);
+        }
       }
     }
   }
@@ -339,6 +441,7 @@ export class MemoryTaskStore implements TaskStore {
   clear(): void {
     this.tasks.clear();
     this.events.clear();
+    this.checkpoints.clear();
     this.nextSeq = 1;
   }
 }

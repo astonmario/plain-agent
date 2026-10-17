@@ -11,6 +11,8 @@ export interface TaskOrchestratorConfig {
   workerId?: string;
   maxAttempts?: number;
   leaseRenewIntervalMs?: number;
+  /** Maximum ReAct iterations executed in one durable turn. */
+  turnMaxIterations?: number;
   createAgent: (sessionId: string) => PlainAgent;
   prepareAgent?: (agent: PlainAgent, sessionId: string, taskId: string) => Promise<void>;
 }
@@ -19,6 +21,7 @@ export interface TaskRecoveryResult {
   expired: number;
   started: number;
   failed: number;
+  blocked: number;
 }
 
 const TERMINAL: ReadonlySet<TaskStatus> = new Set([
@@ -44,16 +47,19 @@ export class TaskOrchestrator extends EventEmitter {
   private readonly workerId: string;
   private readonly maxAttempts: number;
   private readonly leaseRenewIntervalMs: number;
+  private readonly turnMaxIterations: number;
   private readonly active = new Map<string, Promise<string>>();
   private readonly activeAgents = new Map<string, PlainAgent>();
   private readonly activeAttempts = new Map<string, number>();
   private readonly renewTimers = new Map<string, ReturnType<typeof setInterval>>();
+  private recoveryTimer?: ReturnType<typeof setTimeout>;
 
   constructor(private readonly config: TaskOrchestratorConfig) {
     super();
     this.workerId = config.workerId ?? `worker-${randomUUID()}`;
     this.maxAttempts = config.maxAttempts ?? 2;
     this.leaseRenewIntervalMs = config.leaseRenewIntervalMs ?? 20_000;
+    this.turnMaxIterations = config.turnMaxIterations ?? 10;
   }
 
   async createTask(
@@ -136,18 +142,66 @@ export class TaskOrchestrator extends EventEmitter {
   }
 
   async recover(): Promise<TaskRecoveryResult> {
+    if (this.recoveryTimer) {
+      clearTimeout(this.recoveryTimer);
+      this.recoveryTimer = undefined;
+    }
     const expired = await this.config.taskStore.recoverExpiredTasks();
-    const queued = (await this.config.taskStore.listTasks({ status: 'queued' }))
-      .filter(task => task.parentId === undefined);
+    const allTasks = await this.config.taskStore.listTasks();
+    const roots = allTasks.filter(task =>
+      task.parentId === undefined &&
+      (task.status === 'queued' ||
+        task.status === 'waiting_child' ||
+        task.status === 'waiting_process'),
+    );
+    const recoverable = new Set(
+      (await this.config.taskStore.listRecoverableTasks()).map(task => task.id),
+    );
     let started = 0;
     let failed = 0;
+    let blocked = 0;
 
-    const results = await Promise.allSettled(queued.map(task => this.resume(task.id)));
+    const results = await Promise.allSettled(roots.map(async task => {
+      try {
+        const tree = await this.config.taskStore.recoverTaskTree(task.rootId);
+        const waitingChild = tree.find(member => member.status === 'waiting_child');
+        if (waitingChild || !recoverable.has(task.id)) {
+          // P2 will use the checkpoint to resume the parent at the child-wait boundary.
+          // Re-running the original prompt here could create duplicate children.
+          const reason = waitingChild
+            ? 'waiting-child-requires-checkpoint'
+            : 'waiting-process-requires-external-wakeup';
+          const changed = await this.config.taskStore.updateTaskStatus(task.id, 'blocked', {
+            error: `Task recovery deferred: ${reason}`,
+          });
+          await this.appendTaskEvent(task.id, 'task-recovery-deferred', {
+            reason,
+            changed,
+          });
+          return 'blocked' as const;
+        }
+        await this.appendTaskEvent(task.id, 'task-recovery-started', {
+          rootId: task.rootId,
+          workerId: this.workerId,
+        });
+        return this.resume(task.id);
+      } catch (error) {
+        await this.appendTaskEvent(task.id, 'task-recovery-failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+    }));
     for (const result of results) {
-      if (result.status === 'fulfilled') started++;
-      else failed++;
+      if (result.status === 'fulfilled') {
+        if (result.value === 'blocked') blocked++;
+        else started++;
+      } else {
+        failed++;
+      }
     }
-    return { expired, started, failed };
+    this.scheduleLeaseRecovery();
+    return { expired, started, failed, blocked };
   }
 
   async cancel(taskId: string): Promise<boolean> {
@@ -196,6 +250,10 @@ export class TaskOrchestrator extends EventEmitter {
   shutdown(): void {
     for (const taskId of this.renewTimers.keys()) {
       this.stopRenewal(taskId);
+    }
+    if (this.recoveryTimer) {
+      clearTimeout(this.recoveryTimer);
+      this.recoveryTimer = undefined;
     }
   }
 
@@ -270,7 +328,78 @@ export class TaskOrchestrator extends EventEmitter {
       }
 
       try {
-        const output = await runningAgent!.submit(claimed.prompt, claimed.id);
+        let output: string;
+        const durableAgent = runningAgent as PlainAgent & {
+          runTurn?: (
+            taskId: string,
+            prompt: string,
+            options?: { maxIterations?: number },
+          ) => Promise<{
+            status: string;
+            output?: string;
+            checkpointId?: string;
+            reason?: string;
+            error?: { message: string };
+          }>;
+          resume?: (
+            taskId: string,
+            checkpointId?: string,
+          ) => Promise<{
+            status: string;
+            output?: string;
+            checkpointId?: string;
+            reason?: string;
+            error?: { message: string };
+          }>;
+        };
+
+        if (typeof durableAgent.runTurn === 'function' && typeof durableAgent.resume === 'function') {
+          await (runningAgent as any).recoverPendingSubagents?.(taskId);
+          let turn = claimed.checkpointId
+            ? await durableAgent.resume(claimed.id, claimed.checkpointId)
+            : await durableAgent.runTurn(claimed.id, claimed.prompt, {
+              maxIterations: this.turnMaxIterations,
+            });
+
+          while (turn.status === 'paused') {
+            await this.appendTaskEvent(taskId, 'turn-continued', {
+              checkpointId: turn.checkpointId,
+              attempt: claimed.attempt,
+            });
+            const renewed = await this.config.taskStore.renewLease(
+              taskId,
+              this.workerId,
+              claimed.attempt,
+            );
+            if (!renewed) {
+              throw leaseLostError(taskId, claimed.attempt);
+            }
+            turn = await durableAgent.resume(claimed.id, turn.checkpointId);
+          }
+
+          if (turn.status === 'blocked') {
+            const reason = turn.reason ?? 'Task blocked during recovery';
+            const blocked = await this.config.taskStore.blockAttempt(
+              taskId,
+              this.workerId,
+              claimed.attempt,
+              reason,
+            );
+            if (blocked) {
+              await this.appendTaskEvent(taskId, 'task-blocked', { reason });
+              await this.config.taskStore.releaseLease(taskId, this.workerId, claimed.attempt);
+              return reason;
+            }
+            throw leaseLostError(taskId, claimed.attempt);
+          }
+          if (turn.status !== 'completed') {
+            throw new Error(turn.error?.message ?? turn.reason ?? `Task turn ended as ${turn.status}`);
+          }
+          output = turn.output ?? '';
+        } else {
+          // Compatibility path for lightweight agents and existing integrations.
+          output = await runningAgent!.submit(claimed.prompt, claimed.id);
+        }
         if (this.activeAttempts.get(taskId) !== claimed.attempt) {
           throw leaseLostError(taskId, claimed.attempt);
         }
@@ -382,6 +511,30 @@ export class TaskOrchestrator extends EventEmitter {
     if (!timer) return;
     clearInterval(timer);
     this.renewTimers.delete(taskId);
+  }
+
+  private scheduleLeaseRecovery(): void {
+    if (this.recoveryTimer) clearTimeout(this.recoveryTimer);
+    void this.config.taskStore.listTasks().then(tasks => {
+      const nextExpiry = tasks
+        .filter(task =>
+          task.status === 'running' &&
+          task.leaseUntil !== undefined &&
+          !this.active.has(task.id),
+        )
+        .reduce<number | undefined>(
+          (nearest, task) => Math.min(nearest ?? Infinity, task.leaseUntil!),
+          undefined,
+        );
+      if (nextExpiry === undefined) return;
+
+      this.recoveryTimer = setTimeout(() => {
+        this.recoveryTimer = undefined;
+        void this.recover().catch(error => this.emit('task-error', { error }));
+      }, Math.max(1, nextExpiry - Date.now() + 1));
+      const maybeUnref = this.recoveryTimer as ReturnType<typeof setTimeout> & { unref?: () => void };
+      maybeUnref.unref?.();
+    }).catch(error => this.emit('task-error', { error }));
   }
 
   private async appendTaskEvent(taskId: string, type: string, data: unknown): Promise<void> {

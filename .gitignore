@@ -9,6 +9,9 @@ out/
 .DS_Store
 Thumbs.db
 
+# 本地调试数据（desktop/dev-local.cmd 的 userData 目录）
+.dev-data/
+
 # AI Agent 生成的文件夹
 .codex
 .claude

@@ -15,6 +15,13 @@ import {
 } from '@plain-agent/domain';
 import { AgentService } from './agent-service.js';
 
+// 本地调试用：部分 Windows 环境（如 Insider 预览版）下默认 userData 目录会导致
+// Electron 启动崩溃，可通过 PLAIN_AGENT_USER_DATA 指定一个可用目录来规避。
+const userDataOverride = process.env.PLAIN_AGENT_USER_DATA;
+if (userDataOverride) {
+  app.setPath('userData', userDataOverride);
+}
+
 let mainWindow: BrowserWindow | null = null;
 let agentService: AgentService | null = null;
 

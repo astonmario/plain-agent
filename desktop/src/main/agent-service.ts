@@ -92,6 +92,10 @@ export class AgentService {
   private mcpCleanup: (() => Promise<void>) | null = null;
   private userDataDir: string;
   private currentWorkspace: { path: string; name: string } | null = null;
+  /** 当前工作区是否由用户显式选择（false = 默认工作区） */
+  private workspaceExplicit = false;
+  /** 默认工作区路径缓存，避免反复探测/创建目录 */
+  private defaultWorkspaceCache: string | null = null;
 
   constructor() {
     // 加载环境变量（作为 fallback 层）
@@ -237,8 +241,8 @@ export class AgentService {
       this.currentSessionId = sessionId;
       const agent = this.createAgent(sessionId);
 
-      // 持久化会话记录（fire-and-forget，db 操作是同步的）
-      const workspace = this.currentWorkspace?.path ?? this.defaultWorkspacePath();
+      // 持久化会话记录（fire-and-forget，db 操作是同步的）；显式工作区才绑定路径
+      const workspace = this.workspaceExplicit ? this.currentWorkspace?.path : undefined;
       this.storage.createSession(sessionId, '新会话', workspace).catch(err => {
         console.error('创建会话失败:', err);
       });
@@ -259,17 +263,21 @@ export class AgentService {
 
   // ============ 会话管理 ============
 
-  /** 列出所有会话 */
+  /** 列出所有会话（默认工作区不落库，统一归一化为 undefined，便于按工作区分组） */
   async listSessions(): Promise<Session[]> {
-    return this.storage.listSessions();
+    const sessions = await this.storage.listSessions();
+    const def = this.defaultWorkspacePath();
+    return sessions.map(session =>
+      session.workspace === def ? { ...session, workspace: undefined } : session,
+    );
   }
 
-  /** 创建新会话（绑定当前工作区并持久化） */
+  /** 创建新会话：显式工作区才绑定路径，默认工作区存 null */
   async createSession(title: string): Promise<Session> {
     const sessionId = randomUUID();
     const agent = this.createAgent(sessionId);
     this.currentSessionId = sessionId;
-    const workspace = this.currentWorkspace?.path ?? this.defaultWorkspacePath();
+    const workspace = this.workspaceExplicit ? this.currentWorkspace?.path : undefined;
     await this.storage.createSession(sessionId, title, workspace);
 
     return {
@@ -278,7 +286,7 @@ export class AgentService {
       createdAt: Date.now(),
       updatedAt: Date.now(),
       status: 'active',
-      workspace,
+      ...(workspace ? { workspace } : {}),
     };
   }
 
@@ -287,17 +295,20 @@ export class AgentService {
     const agent = this.agents.get(sessionId) || this.createAgent(sessionId);
     this.currentSessionId = sessionId;
 
-    // 会话级工作区：优先使用该会话绑定的路径；老会话没有绑定时落默认文件夹并补写
+    // 会话级工作区：绑定路径（非默认）则恢复为显式工作区；否则回默认
     const bound = await this.storage.getSessionWorkspace(sessionId);
-    if (bound && existsSync(bound)) {
+    const def = this.defaultWorkspacePath();
+    if (bound && bound !== def && existsSync(bound)) {
       const name = bound.split(/[/\\]/).filter(Boolean).pop() || 'workspace';
       this.currentWorkspace = { path: bound, name };
+      this.workspaceExplicit = true;
     } else {
-      const fallback = this.defaultWorkspacePath();
-      const name = fallback.split(/[/\\]/).filter(Boolean).pop() || 'workspace';
-      this.currentWorkspace = { path: fallback, name };
-      if (!bound) {
-        await this.storage.setSessionWorkspace(sessionId, fallback);
+      const name = def.split(/[/\\]/).filter(Boolean).pop() || 'workspace';
+      this.currentWorkspace = { path: def, name };
+      this.workspaceExplicit = false;
+      // 旧数据里指向默认目录的绑定归一化为 null，避免侧边栏多出一个“默认目录”分组
+      if (bound) {
+        await this.storage.setSessionWorkspace(sessionId, null);
       }
     }
 
@@ -380,17 +391,32 @@ export class AgentService {
     }
   }
 
-  /** 停止任务 */
+  /**
+   * 停止任务。
+   * - 传 taskId：只停该任务；
+   * - 不传：停止所有会话中正在运行的任务（UI 的全局停止按钮）。
+   *
+   * 两路都做：orchestrator.cancel 负责落库为 cancelled 并发事件，
+   * agent.stop 直接 abort，避免任务没进 orchestrator 时停不下来。
+   */
   stop(taskId?: string): void {
-    const agent = this.getCurrentAgent();
-    const taskIds = taskId ? [taskId] : agent.getRunningTasks();
-    if (taskIds.length === 0) {
-      agent.stop(taskId);
+    const agents = [...this.agents.values()];
+
+    if (taskId) {
+      void this.taskOrchestrator.cancel(taskId);
+      for (const agent of agents) agent.stop(taskId);
       return;
     }
-    for (const activeTaskId of taskIds) {
-      void this.taskOrchestrator.cancel(activeTaskId);
+
+    const running = new Set<string>();
+    for (const agent of agents) {
+      for (const id of agent.getRunningTasks()) running.add(id);
     }
+    for (const id of running) {
+      void this.taskOrchestrator.cancel(id);
+    }
+    // 兜底：orchestrator 中没有记录（或取消失败）的任务也一并中断
+    for (const agent of agents) agent.stop();
   }
 
   /** 获取运行中的任务 ID */
@@ -443,7 +469,8 @@ export class AgentService {
     this.settingsStore.save(this.settings);
 
     // 默认文件夹只影响之后新建的会话；当前会话保持自己的绑定
-    if (!this.currentSessionId) this.applyDefaultWorkspace();
+    this.defaultWorkspaceCache = null;
+    if (!this.currentSessionId || !this.workspaceExplicit) this.applyDefaultWorkspace();
 
     // 重建 agent（销毁旧的，配置变了）
     const oldSessionId = this.currentSessionId;
@@ -580,13 +607,19 @@ export class AgentService {
    *    不存在时自动创建。这样工具永远不会退回到应用启动目录。
    */
   private defaultWorkspacePath(): string {
+    if (this.defaultWorkspaceCache) return this.defaultWorkspaceCache;
+
     const configured = this.settings.defaultWorkspace;
-    if (configured && existsSync(configured)) return configured;
+    if (configured && existsSync(configured)) {
+      this.defaultWorkspaceCache = configured;
+      return configured;
+    }
 
     // 首选「文档/plain-agent-default-workspace」，与 DeepSeek Harness 一致
     const preferred = join(app.getPath('documents'), 'plain-agent-default-workspace');
     try {
       mkdirSync(preferred, { recursive: true });
+      this.defaultWorkspaceCache = preferred;
       return preferred;
     } catch (error) {
       console.error('创建默认工作区失败，回退到 userData:', error);
@@ -599,6 +632,7 @@ export class AgentService {
     } catch (error) {
       console.error('创建回退工作区失败:', error);
     }
+    this.defaultWorkspaceCache = fallback;
     return fallback;
   }
 
@@ -609,6 +643,7 @@ export class AgentService {
     const path = this.defaultWorkspacePath();
     const name = path.split(/[/\\]/).filter(Boolean).pop() || 'workspace';
     this.currentWorkspace = { path, name };
+    this.workspaceExplicit = false;
   }
 
   /**
@@ -624,6 +659,7 @@ export class AgentService {
   async setWorkspace(path: string): Promise<{ path: string; name: string }> {
     const name = path.split(/[/\\]/).filter(Boolean).pop() || 'workspace';
     this.currentWorkspace = { path, name };
+    this.workspaceExplicit = true;
     if (this.currentSessionId) {
       await this.storage.setSessionWorkspace(this.currentSessionId, path);
     }

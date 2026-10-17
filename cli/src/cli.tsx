@@ -265,13 +265,11 @@ async function main(): Promise<void> {
         }
         stopTask={(agent) => {
           const activeIds = agent.getRunningTasks();
-          if (activeIds.length === 0) {
-            agent.stop();
-            return;
-          }
           for (const taskId of activeIds) {
             void taskOrchestrator.cancel(taskId);
           }
+          // 兜底：无论 orchestrator 是否接住，都直接中断 agent 的控制器（幂等）
+          agent.stop();
         }}
         storage={storage}
         info={info}

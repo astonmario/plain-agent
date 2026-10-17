@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, isValidElement } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback, isValidElement } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AgentEvent, Session, ChatMessage, InteractionQuestion } from '@plain-agent/domain/types';
@@ -140,6 +140,63 @@ interface ToolCallItem {
   meta?: string;
   result?: string;
   duration?: number;
+  /** 运行状态：工具开始后为 running，结果返回后按错误前缀判定 done/error */
+  status: 'running' | 'done' | 'error';
+  startedAt: number;
+}
+
+/** 工具结果里表示失败的前缀（由 domain/loop.ts 产生） */
+const TOOL_ERROR_PREFIXES = ['工具执行失败', '工具未找到', '参数解析失败', '[权限拒绝]', '已取消'];
+
+function isToolError(result?: string): boolean {
+  if (!result) return false;
+  return TOOL_ERROR_PREFIXES.some((prefix) => result.startsWith(prefix));
+}
+
+function formatDuration(ms?: number): string {
+  if (ms == null) return '';
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+const TOOL_TITLES: Record<string, string> = {
+  read_file: '读取文件',
+  write_file: '写入文件',
+  edit_file: '编辑文件',
+  bash: '执行命令',
+  glob: '查找文件',
+  grep: '搜索内容',
+  explore: '浏览目录',
+  list_directory: '列出目录',
+  http_get: 'HTTP 请求',
+  calculator: '计算',
+  datetime: '获取时间',
+  update_memory: '更新记忆',
+  lookup_history: '查历史',
+  search_history: '搜历史',
+  spawn_subagent: '创建子任务',
+  wait_subagent: '等待子任务',
+  cancel_subagent: '取消子任务',
+  get_subagent_status: '子任务状态',
+};
+
+function toolTitle(name: string): string {
+  return TOOL_TITLES[name] || name;
+}
+
+/** 从参数里提取一行摘要：优先路径/命令/查询，否则空 */
+function toolSummary(tool: ToolCallItem): string {
+  if (!tool.meta) return '';
+  try {
+    const args = JSON.parse(tool.meta);
+    const value =
+      args.path ?? args.file_path ?? args.command ?? args.pattern ?? args.query ??
+      args.url ?? args.description ?? args.prompt ?? args.task;
+    if (typeof value === 'string') return value.replace(/\s+/g, ' ').trim();
+  } catch {
+    /* 参数不是合法 JSON 时不展示摘要 */
+  }
+  return '';
 }
 
 let messageSeq = 0;
@@ -169,6 +226,8 @@ function App({ client }: AppProps) {
   const [messages, setMessages] = useState<UIMessage[]>([]);
   const [input, setInput] = useState('');
   const [isRunning, setIsRunning] = useState(false);
+  /** 已点击停止、等待 stopped/task-end 事件返回 */
+  const [stopping, setStopping] = useState(false);
   /** 正在等待模型首个 token：瞬时状态，不写入消息列表 */
   const [thinking, setThinking] = useState(false);
   const [config, setConfig] = useState<AppConfig | null>(null);
@@ -442,12 +501,14 @@ function App({ client }: AppProps) {
         const item: ToolCallItem = {
           name: event.tool,
           callId: event.callId,
-          meta: JSON.stringify(event.args, null, 2).slice(0, 300),
+          meta: JSON.stringify(event.args ?? {}, null, 2),
+          status: 'running',
+          startedAt: event.timestamp,
         };
         if (!gid) {
           const id = nextId();
           toolGroupIdRef.current = id;
-          appendMessage({ kind: 'tool-group', text: '', tools: [item], timestamp: event.timestamp });
+          appendMessage({ id, kind: 'tool-group', text: '', tools: [item], timestamp: event.timestamp });
         } else {
           setMessages((prev) =>
             prev.map((m) =>
@@ -476,13 +537,22 @@ function App({ client }: AppProps) {
                   name: event.tool,
                   result: event.result.slice(0, 500),
                   duration: event.duration,
+                  status: isToolError(event.result) ? 'error' : 'done',
+                  startedAt: event.timestamp - (event.duration ?? 0),
                 }],
               };
             }
             return {
               ...m,
               tools: m.tools.map((t, i) =>
-                i === idx ? { ...t, result: event.result.slice(0, 500), duration: event.duration } : t,
+                i === idx
+                  ? {
+                      ...t,
+                      result: event.result.slice(0, 500),
+                      duration: event.duration,
+                      status: isToolError(event.result) ? 'error' : 'done',
+                    }
+                  : t,
               ),
             };
           }),
@@ -526,6 +596,7 @@ function App({ client }: AppProps) {
         });
         // 保险：出错即复位运行状态（正常路径依赖 submit 的 reject，这里兜底）
         setIsRunning(false);
+        setStopping(false);
         setThinking(false);
         setInteraction(null);
         break;
@@ -534,6 +605,7 @@ function App({ client }: AppProps) {
         flushStreaming();
         closeToolGroup();
         setIsRunning(false);
+        setStopping(false);
         setThinking(false);
         setInteraction(null);
         refreshUsage();
@@ -544,6 +616,7 @@ function App({ client }: AppProps) {
         closeToolGroup();
         appendMessage({ kind: 'system', text: '任务已停止', timestamp: event.timestamp });
         setIsRunning(false);
+        setStopping(false);
         setThinking(false);
         setInteraction(null);
         break;
@@ -563,6 +636,7 @@ function App({ client }: AppProps) {
         flushStreaming();
         closeToolGroup();
         setIsRunning(false);
+        setStopping(false);
         setThinking(false);
         setInteraction(null);
         // 长任务以 task-end 收尾（不是 done），同样需要刷新用量
@@ -571,8 +645,8 @@ function App({ client }: AppProps) {
     }
   }, [refreshUsage, flushStreaming, closeToolGroup]);
 
-  const appendMessage = (msg: Omit<UIMessage, 'id'>) => {
-    setMessages((prev) => [...prev, { ...msg, id: nextId() }]);
+  const appendMessage = (msg: Omit<UIMessage, 'id'> & { id?: string }) => {
+    setMessages((prev) => [...prev, { ...msg, id: msg.id ?? nextId() }]);
   };
 
   /** 提交任务文本（输入框和选项点击共用） */
@@ -615,6 +689,31 @@ function App({ client }: AppProps) {
   // 只有最后一条 assistant 消息的选项可点，历史问答里的选项全部禁用
   const lastAssistantId = [...messages].reverse().find((m) => m.kind === 'assistant')?.id;
 
+  /** 按工作区分组：默认工作区排最前，其余按最近会话排序 */
+  const sessionGroups = useMemo(() => {
+    const groups = new Map<string, { key: string; label: string; path?: string; sessions: Session[] }>();
+    for (const session of sessions) {
+      const path = session.workspace;
+      const key = path ?? '__default__';
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          label: path ? path.split(/[/\\]/).filter(Boolean).pop() || path : '默认工作区',
+          path,
+          sessions: [],
+        });
+      }
+      groups.get(key)!.sessions.push(session);
+    }
+    const list = [...groups.values()];
+    list.sort((a, b) => {
+      if (a.key === '__default__') return -1;
+      if (b.key === '__default__') return 1;
+      return (b.sessions[0]?.updatedAt ?? 0) - (a.sessions[0]?.updatedAt ?? 0);
+    });
+    return list;
+  }, [sessions]);
+
   const handleSubmit = async () => {
     const task = input.trim();
     if (!task || isRunning) return;
@@ -623,7 +722,14 @@ function App({ client }: AppProps) {
   };
 
   const handleStop = async () => {
-    await client.stopTask(currentSessionId);
+    if (stopping) return;
+    setStopping(true);
+    try {
+      await client.stopTask(currentSessionId);
+    } finally {
+      // 兜底：2s 内没收到 stopped/task-end 就恢复按钮，避免一直卡在“停止中”
+      window.setTimeout(() => setStopping(false), 2000);
+    }
   };
 
   const handleCompress = async () => {
@@ -672,7 +778,14 @@ function App({ client }: AppProps) {
           {sessions.length === 0 && (
             <div className="session-empty">暂无会话</div>
           )}
-          {sessions.map((session) => (
+          {sessionGroups.map((group) => (
+            <div key={group.key} className="session-group">
+              <div className="session-group-header" title={group.path ?? ''}>
+                <span className="session-group-icon">📁</span>
+                <span className="session-group-label">{group.label}</span>
+                <span className="session-group-count">{group.sessions.length}</span>
+              </div>
+              {group.sessions.map((session) => (
             <div
               key={session.id}
               className={`session-item ${session.id === currentSessionId ? 'active' : ''}`}
@@ -719,6 +832,8 @@ function App({ client }: AppProps) {
                   </div>
                 </>
               )}
+            </div>
+              ))}
             </div>
           ))}
         </div>
@@ -838,7 +953,9 @@ function App({ client }: AppProps) {
             />
             <div className="input-actions">
               {isRunning ? (
-                <button className="btn btn-stop" onClick={handleStop}>■ 停止</button>
+                <button className="btn btn-stop" onClick={handleStop} disabled={stopping}>
+                  {stopping ? '停止中…' : '■ 停止'}
+                </button>
               ) : (
                 <button className="btn btn-send" onClick={handleSubmit} disabled={!input.trim()}>
                   发送
@@ -1268,34 +1385,41 @@ function MessageBubble({ msg, onSelectOption, disabled }: {
     );
   }
 
-  // 工具调用组：一轮 loop 的多个工具聚合成一张折叠卡片
+  // 工具调用组：一轮 loop 的多个工具聚合；运行中自动展开并逐行显示状态
   if (msg.kind === 'tool-group') {
-    const [expanded, setExpanded] = useState(false);
     const tools = msg.tools ?? [];
-    const names = tools.map((t) => t.name);
-    const summary = names.length <= 2
-      ? names.join('、')
-      : `${names.slice(0, 2).join('、')} 等 ${names.length} 个`;
+    const running = tools.some((t) => t.status === 'running');
+    const errorCount = tools.filter((t) => t.status === 'error').length;
+    const totalDuration = tools.reduce((sum, t) => sum + (t.duration ?? 0), 0);
+    const [expanded, setExpanded] = useState(running);
+
+    // 组从“运行中”变为“已完成”时自动收起一次；用户手动展开后不再干预
+    const wasRunningRef = useRef(running);
+    useEffect(() => {
+      if (wasRunningRef.current && !running) setExpanded(false);
+      wasRunningRef.current = running;
+    }, [running]);
+
     return (
       <div className="message message-tool">
-        <div className="tool-card">
-          <div className="tool-header" onClick={() => setExpanded(!expanded)}>
-            <IconTool />
-            <span>调用工具 {summary}</span>
-            <span className="tool-toggle">{expanded ? '▼' : '▶'}</span>
-          </div>
+        <div className={`tool-card${running ? ' is-running' : ''}${expanded ? ' is-expanded' : ''}`}>
+          <button type="button" className="tool-header" onClick={() => setExpanded((v) => !v)}>
+            <span className={`tool-spinner${running ? ' spinning' : ''}`} aria-hidden />
+            <span className="tool-header-title">
+              {running ? '正在执行' : `${tools.length} 次工具调用`}
+            </span>
+            <span className="tool-header-meta">
+              {errorCount > 0 && <span className="tool-badge-error">{errorCount} 失败</span>}
+              {!running && totalDuration > 0 && (
+                <span className="tool-duration">{formatDuration(totalDuration)}</span>
+              )}
+            </span>
+            <span className={`tool-chevron${expanded ? ' open' : ''}`} aria-hidden />
+          </button>
           {expanded && (
-            <div className="tool-group-items">
+            <div className="tool-list">
               {tools.map((t, i) => (
-                <div key={i} className="tool-group-item">
-                  <div className="tool-group-item-head">
-                    <IconTool />
-                    <span className="tool-group-item-name">{t.name}</span>
-                    {t.duration != null && <span className="tool-group-item-time">{t.duration}ms</span>}
-                  </div>
-                  {t.meta && <pre className="tool-params">{t.meta}</pre>}
-                  {t.result && <pre className="tool-params tool-result">{t.result}</pre>}
-                </div>
+                <ToolRow key={t.callId ?? `${i}-${t.name}`} tool={t} />
               ))}
             </div>
           )}
@@ -1312,13 +1436,25 @@ function MessageBubble({ msg, onSelectOption, disabled }: {
         <div className="tool-card">
           <div className="tool-header" onClick={() => setExpanded(!expanded)}>
             <IconTool />
-            <span>{msg.text}</span>
+            <span title={msg.text}>{msg.text}</span>
             <span className="tool-toggle">{expanded ? '▼' : '▶'}</span>
           </div>
           {expanded && msg.meta && (
             <pre className="tool-params">{msg.meta}</pre>
           )}
         </div>
+      </div>
+    );
+  }
+
+  // 轮次分隔：把“第 N 轮迭代”渲染成低调的分隔线，而不是普通系统消息
+  if (msg.kind === 'system' && /^第 \d+ 轮迭代$/.test(msg.text)) {
+    return (
+      <div className="round-divider">
+        <span className="round-divider-line" />
+        <span className="round-divider-label">{msg.text}</span>
+        <span className="round-divider-time">{time}</span>
+        <span className="round-divider-line" />
       </div>
     );
   }
@@ -1331,6 +1467,93 @@ function MessageBubble({ msg, onSelectOption, disabled }: {
         <span className="message-time">{time}</span>
       </div>
     </div>
+  );
+}
+
+/**
+ * 工具调用行：图标 + 标题 + 参数摘要 + 状态/耗时，可展开查看参数与结果
+ */
+function ToolRow({ tool }: { tool: ToolCallItem }) {
+  const [open, setOpen] = useState(false);
+  const summary = toolSummary(tool);
+  return (
+    <div className={`tool-row tool-row-${tool.status}`}>
+      <button type="button" className="tool-row-head" onClick={() => setOpen((v) => !v)}>
+        <span className="tool-row-icon"><ToolIcon name={tool.name} /></span>
+        <span className="tool-row-title">{toolTitle(tool.name)}</span>
+        {summary && <span className="tool-row-summary" title={summary}>{summary}</span>}
+        <span className="tool-row-suffix">
+          {tool.status === 'running' && <span className="tool-running">运行中</span>}
+          {tool.status === 'error' && <span className="tool-badge-error">失败</span>}
+          {tool.status !== 'running' && tool.duration != null && (
+            <span className="tool-duration">{formatDuration(tool.duration)}</span>
+          )}
+          <span className={`tool-row-chevron${open ? ' open' : ''}`} aria-hidden />
+        </span>
+      </button>
+      {open && (
+        <div className="tool-row-body">
+          {tool.meta && (
+            <pre className="tool-params">
+              {tool.meta.length > 4000 ? `${tool.meta.slice(0, 4000)}\n…` : tool.meta}
+            </pre>
+          )}
+          {tool.result && <pre className="tool-params tool-result">{tool.result}</pre>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 按工具类别画 14px 图标，避免为每个工具单独引入资源 */
+function ToolIcon({ name }: { name: string }) {
+  const common = {
+    width: 14,
+    height: 14,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 2,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+  };
+  if (['read_file', 'write_file', 'edit_file', 'list_directory', 'explore'].includes(name)) {
+    return (
+      <svg {...common} aria-hidden>
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <polyline points="14 2 14 8 20 8" />
+      </svg>
+    );
+  }
+  if (name === 'bash') {
+    return (
+      <svg {...common} aria-hidden>
+        <polyline points="4 17 10 11 4 5" />
+        <line x1="12" y1="19" x2="20" y2="19" />
+      </svg>
+    );
+  }
+  if (['grep', 'glob', 'search_history', 'lookup_history'].includes(name)) {
+    return (
+      <svg {...common} aria-hidden>
+        <circle cx="11" cy="11" r="7" />
+        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+      </svg>
+    );
+  }
+  if (['http_get', 'web_fetch', 'web_search'].includes(name)) {
+    return (
+      <svg {...common} aria-hidden>
+        <circle cx="12" cy="12" r="10" />
+        <line x1="2" y1="12" x2="22" y2="12" />
+        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...common} aria-hidden>
+      <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+    </svg>
   );
 }
 

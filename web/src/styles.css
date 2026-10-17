@@ -534,6 +534,16 @@ body {
   padding: 2px 0;
 }
 
+/* 思考中的瞬时提示：呼吸感，回答开始即消失 */
+.thinking-indicator .message-body {
+  animation: thinking-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes thinking-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
 /* 工具消息：折叠卡片 */
 .message-tool {
   padding: 0 24px;

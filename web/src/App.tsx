@@ -122,7 +122,7 @@ const IconCopy = () => (
  */
 interface UIMessage {
   id: string;
-  kind: 'user' | 'assistant' | 'thinking' | 'tool' | 'tool-group' | 'system' | 'error' | 'warning';
+  kind: 'user' | 'assistant' | 'tool' | 'tool-group' | 'system' | 'error' | 'warning';
   text: string;
   meta?: string;
   /** 一轮 loop 内的工具调用列表（kind = tool-group 时使用） */
@@ -167,6 +167,8 @@ function App({ client }: AppProps) {
   const [messages, setMessages] = useState<UIMessage[]>([]);
   const [input, setInput] = useState('');
   const [isRunning, setIsRunning] = useState(false);
+  /** 正在等待模型首个 token：瞬时状态，不写入消息列表 */
+  const [thinking, setThinking] = useState(false);
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [usage, setUsage] = useState<HistoryUsage | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -202,7 +204,7 @@ function App({ client }: AppProps) {
   // 滚动到底部
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, thinking]);
 
   // 初始化：加载配置、会话列表，订阅事件
   useEffect(() => {
@@ -237,6 +239,7 @@ function App({ client }: AppProps) {
     setCurrentSessionId(sessionId);
     setMessages([]);
     setIsRunning(false);
+    setThinking(false);
     streamRef.current = null;
     toolGroupIdRef.current = null;
     await client.switchSession?.(sessionId);
@@ -252,6 +255,8 @@ function App({ client }: AppProps) {
     setCurrentSessionId(session.sessionId);
     setMessages([]);
     setUsage(null);
+    setIsRunning(false);
+    setThinking(false);
     streamRef.current = null;
     toolGroupIdRef.current = null;
     await refreshSessions();
@@ -368,12 +373,14 @@ function App({ client }: AppProps) {
       case 'user':
         flushStreaming();
         closeToolGroup();
+        setThinking(false);
         appendMessage({ kind: 'user', text: event.message, timestamp: event.timestamp });
         break;
 
       case 'text_delta': {
         // 文本输出开始后，工具组收尾
         closeToolGroup();
+        setThinking(false);
         // 在 ref 中累积（事件处理器中写 ref 是安全的；
         // 不放进 setState updater，避免 React 重放/丢弃 updater 时 ref 与列表失配）
         if (!streamRef.current) {
@@ -387,18 +394,21 @@ function App({ client }: AppProps) {
       case 'assistant':
         // 流式文本固化进消息列表（无流式内容时兜底追加）
         closeToolGroup();
+        setThinking(false);
         if (!flushStreaming()) {
           appendMessage({ kind: 'assistant', text: event.message, timestamp: event.timestamp });
         }
         break;
 
       case 'thinking':
-        appendMessage({ kind: 'thinking', text: event.content, timestamp: event.timestamp });
+        // 瞬时提示：回答/工具/结束事件都会清掉，不写入消息列表
+        setThinking(true);
         break;
 
       case 'tool_start': {
         // 文本段落（如思考过程）在工具卡片前收尾
         flushStreaming();
+        setThinking(false);
         // 同一轮 loop 的多个工具调用聚合到一张卡片
         const gid = toolGroupIdRef.current;
         const item: ToolCallItem = {
@@ -486,6 +496,7 @@ function App({ client }: AppProps) {
         });
         // 保险：出错即复位运行状态（正常路径依赖 submit 的 reject，这里兜底）
         setIsRunning(false);
+        setThinking(false);
         setInteraction(null);
         break;
 
@@ -493,6 +504,7 @@ function App({ client }: AppProps) {
         flushStreaming();
         closeToolGroup();
         setIsRunning(false);
+        setThinking(false);
         setInteraction(null);
         refreshUsage();
         break;
@@ -502,15 +514,18 @@ function App({ client }: AppProps) {
         closeToolGroup();
         appendMessage({ kind: 'system', text: '任务已停止', timestamp: event.timestamp });
         setIsRunning(false);
+        setThinking(false);
         setInteraction(null);
         break;
 
       case 'task-start':
         setIsRunning(true);
+        setThinking(false);
         break;
 
       case 'interaction':
         // ask_question：弹出提问模态，阻塞等用户回答
+        setThinking(false);
         setInteraction({ id: event.id, questions: event.questions });
         break;
 
@@ -518,6 +533,7 @@ function App({ client }: AppProps) {
         flushStreaming();
         closeToolGroup();
         setIsRunning(false);
+        setThinking(false);
         setInteraction(null);
         break;
     }
@@ -748,6 +764,12 @@ function App({ client }: AppProps) {
               disabled={isRunning || msg.id !== lastAssistantId}
             />
           ))}
+          {/* 思考中的瞬时提示：不进消息列表，回答/工具/结束事件到达即消失 */}
+          {thinking && isRunning && !streamRef.current && (
+            <div className="message message-thinking thinking-indicator">
+              <div className="message-body">思考中...</div>
+            </div>
+          )}
           {/* 流式输出气泡：文本累积在 ref 中，streamVersion 变化触发重渲染；done 后 flushStreaming 固化成正式消息 */}
           {streamRef.current && (
             <div className="message message-assistant">
@@ -1265,7 +1287,7 @@ function MessageBubble({ msg, onSelectOption, disabled }: {
     );
   }
 
-  // 其他类型（thinking/system/error/warning）
+  // 其他类型（system/error/warning）
   return (
     <div className={`message message-${msg.kind}`}>
       <div className="message-body">{msg.text}</div>

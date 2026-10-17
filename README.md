@@ -20,11 +20,16 @@
 
 ## 🚀 快速开始
 
+> 新机器的完整步骤（环境要求、镜像配置、打包、常见问题）见 **[docs/SETUP.md](docs/SETUP.md)**。
+> Windows 上也可以直接运行 `powershell -ExecutionPolicy Bypass -File scripts\setup.ps1` 一键准备环境。
+
 ### 1. 安装依赖
 
 ```bash
 pnpm install
 ```
+
+仓库根目录的 `.npmrc` 已配置 Electron 与 electron-builder 的 npmmirror 镜像，国内网络无需额外设置。
 
 ### 2. 配置环境变量
 
@@ -266,6 +271,11 @@ pnpm server
 
 # 启动桌面端
 pnpm dev:desktop
+
+# 打包桌面端（产物在 desktop/dist/）
+pnpm --filter @plain-agent/desktop run pack                # 免安装目录
+pnpm --filter @plain-agent/desktop run build:win:portable  # 便携版
+pnpm --filter @plain-agent/desktop run build:win:nsis      # NSIS 安装包（正式版 Windows / CI）
 ```
 
 ## 📄 License

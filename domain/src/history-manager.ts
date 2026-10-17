@@ -16,20 +16,20 @@ import { CompressionTrigger, type SessionHealth } from './compression-trigger';
 
 export interface HistoryConfig {
   enabled?: boolean;               // 是否启用历史管理（默认 true）
-  maxTokens?: number;              // 最大 token 数（默认 8000）
+  maxTokens?: number;              // 最大 token 数（默认 200000）
   maxToolOutputLength?: number;    // 单个工具输出最大长度（默认 1000 字符）
   keepRecentMessages?: number;     // 保留最近 N 条消息不压缩（默认 10）
-  compressionThreshold?: number;   // 触发第二层压缩的阈值（默认 6000）
-  aggressiveThreshold?: number;    // 触发第三层激进压缩的阈值（默认 10000）
+  compressionThreshold?: number;   // 触发第二层压缩的阈值（默认 150000）
+  aggressiveThreshold?: number;    // 触发第三层激进压缩的阈值（默认 180000）
 }
 
 const DEFAULT_CONFIG: Required<HistoryConfig> = {
   enabled: true,
-  maxTokens: 8000,
+  maxTokens: 200_000,
   maxToolOutputLength: 1000,
   keepRecentMessages: 10,
-  compressionThreshold: 6000,
-  aggressiveThreshold: 10000,
+  compressionThreshold: 150_000,
+  aggressiveThreshold: 180_000,
 };
 
 // ============ Token 估算 ============

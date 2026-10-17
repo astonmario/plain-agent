@@ -243,11 +243,11 @@ export interface AgentConfig {
 
 export interface HistoryManagementConfig {
   enabled?: boolean;               // 是否启用历史管理（默认 true）
-  maxTokens?: number;              // 最大 token 数（默认 8000）
+  maxTokens?: number;              // 最大 token 数（默认 200000）
   maxToolOutputLength?: number;    // 单个工具输出最大长度（默认 1000）
   keepRecentMessages?: number;     // 保留最近 N 条消息（默认 10）
-  compressionThreshold?: number;   // 触发第二层压缩的 token 阈值（默认 6000）
-  aggressiveThreshold?: number;    // 触发第三层激进压缩的阈值（默认 10000）
+  compressionThreshold?: number;   // 触发第二层压缩的 token 阈值（默认 150000）
+  aggressiveThreshold?: number;    // 触发第三层激进压缩的阈值（默认 180000）
   autoCompress?: boolean;          // 是否自动压缩（默认 true）
 }
 

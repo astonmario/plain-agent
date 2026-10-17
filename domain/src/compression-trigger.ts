@@ -147,7 +147,7 @@ function countRounds(messages: ChatMessage[]): number {
 export class CompressionTrigger {
   private maxTokens: number;
 
-  constructor(maxTokens: number = 8000) {
+  constructor(maxTokens: number = 200_000) {
     this.maxTokens = maxTokens;
   }
 

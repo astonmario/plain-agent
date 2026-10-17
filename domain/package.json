@@ -14,6 +14,10 @@
     "./types": {
       "types": "./src/types.ts",
       "import": "./src/types.ts"
+    },
+    "./usage-format": {
+      "types": "./src/usage-format.ts",
+      "import": "./src/usage-format.ts"
     }
   },
   "scripts": {
@@ -30,6 +34,7 @@
     "test:verification": "tsx test/test-task-verification.ts && tsx test/test-task-verification-crash.ts",
     "test:verification:crash": "tsx test/test-task-verification-crash.ts",
     "test:prefs": "tsx test/test-session-preferences.ts",
+    "test:usage": "tsx test/test-usage.ts",
     "test:subagent": "tsx test/test-subagent-runtime.ts",
     "test:subagent:e2e": "tsx test/test-subagent.ts"
   },

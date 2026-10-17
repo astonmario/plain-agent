@@ -204,9 +204,9 @@ export class AgentService {
       maxIterations: 150,
       historyManagement: {
         enabled: true,
-        maxTokens: 8000,
-        compressionThreshold: 6000,
-        aggressiveThreshold: 10000,
+        maxTokens: 200_000,
+        compressionThreshold: 150_000,
+        aggressiveThreshold: 180_000,
         maxToolOutputLength: 1000,
         keepRecentMessages: 10,
       },

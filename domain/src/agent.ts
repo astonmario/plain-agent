@@ -1083,10 +1083,18 @@ export class PlainAgent extends EventEmitter {
    * @returns 包含 tokens、百分比、是否需要压缩等信息
    */
   getHistoryUsage(useCompressed = true) {
-    const messages = useCompressed
-      ? (this.compressedMessages || this.fullMessages)
-      : this.fullMessages;
-    return this.historyManager.getTokenUsage(messages);
+    const usingCompressed = useCompressed &&
+      Boolean(this.compressedMessages) &&
+      this.compressedMessages !== this.fullMessages;
+    const messages = usingCompressed ? this.compressedMessages! : this.fullMessages;
+    const usage = this.historyManager.getTokenUsage(messages);
+    return {
+      ...usage,
+      /** 未压缩的完整历史估算值，用于展示压缩前后对比 */
+      rawTokens: this.historyManager.getTokenUsage(this.fullMessages).tokens,
+      /** 当前展示的是否为压缩后的历史 */
+      compressed: usingCompressed,
+    };
   }
 
   /**

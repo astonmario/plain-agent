@@ -11,6 +11,8 @@ export interface HistoryUsageInfo {
   maxTokens: number;
   percentage: number;
   needsCompression: boolean;
+  rawTokens?: number;
+  compressed?: boolean;
 }
 
 export interface AgentConfigInfo {

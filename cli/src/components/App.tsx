@@ -9,6 +9,7 @@
 import React, { useEffect, useRef, useCallback, useState } from 'react';
 import { Box, Text, Static, useApp } from 'ink';
 import type { AgentEvent, PlainAgent, SessionStorage, Session } from '@plain-agent/domain';
+import { formatTokenCount, formatUsagePercent } from '@plain-agent/domain/usage-format';
 import { Message, MessageType, ToolCall } from '../types';
 import { MessageItem } from './MessageList';
 import Spinner from './Spinner';
@@ -55,7 +56,12 @@ export default function App(props: AppProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   /** 正在等待模型首个 token：只驱动状态行的文案，不写入消息列表 */
   const [thinking, setThinking] = useState(false);
-  const [usage, setUsage] = useState<{ tokens: number; maxTokens: number } | null>(null);
+  const [usage, setUsage] = useState<{
+    tokens: number;
+    maxTokens: number;
+    rawTokens?: number;
+    compressed?: boolean;
+  } | null>(null);
   const [interaction, setInteraction] = useState<{ id: string; questions: any[] } | null>(null);
   const [sessionSelectMode, setSessionSelectMode] = useState(false);
   const [sessionList, setSessionList] = useState<Session[]>([]);
@@ -102,7 +108,14 @@ export default function App(props: AppProps) {
   const refreshUsage = useCallback(() => {
     try {
       const u = agentRef.current?.getHistoryUsage();
-      if (u) setUsage({ tokens: u.tokens, maxTokens: u.maxTokens });
+      if (u) {
+        setUsage({
+          tokens: u.tokens,
+          maxTokens: u.maxTokens,
+          rawTokens: u.rawTokens,
+          compressed: u.compressed,
+        });
+      }
     } catch {
       /* 忽略 */
     }
@@ -171,6 +184,7 @@ export default function App(props: AppProps) {
           flushStream();
           setThinking(false);
           addMessage(MessageType.ITERATION, `迭代 ${e.index}`);
+          refreshUsage();
           break;
         case 'compression':
           addMessage(MessageType.SYSTEM, `历史压缩 Level ${e.level}: ${e.tokensBefore} → ${e.tokensAfter} tokens`);
@@ -381,7 +395,7 @@ export default function App(props: AppProps) {
         handler: () => {
           refreshUsage();
           if (usage) {
-            addMessage(MessageType.SYSTEM, `历史用量: ${usage.tokens}/${usage.maxTokens} tokens (${((usage.tokens / usage.maxTokens) * 100).toFixed(1)}%)`);
+            addMessage(MessageType.SYSTEM, `历史用量: ${formatUsagePercent((usage.tokens / usage.maxTokens) * 100)} · ${formatTokenCount(usage.tokens)}/${formatTokenCount(usage.maxTokens)} tokens${usage.compressed && usage.rawTokens !== undefined ? ` · 压缩前 ${formatTokenCount(usage.rawTokens)}` : ''}`);
           }
         },
       },
@@ -507,7 +521,8 @@ export default function App(props: AppProps) {
           <Text color="#F59E0B">{thinking ? ' 思考中… ' : ' 处理中… '}</Text>
           {usage && (
             <Text dimColor>
-              {usage.tokens}/{usage.maxTokens} tok
+              {formatUsagePercent((usage.tokens / usage.maxTokens) * 100)} · {formatTokenCount(usage.tokens)}/{formatTokenCount(usage.maxTokens)} tok
+              {usage.compressed && usage.rawTokens !== undefined ? ` · 原 ${formatTokenCount(usage.rawTokens)}` : ''}
             </Text>
           )}
         </Box>

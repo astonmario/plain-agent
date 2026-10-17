@@ -64,6 +64,7 @@ export default defineConfig({
         '@renderer': resolve('src/renderer/src'),
         // 注意顺序：更具体的子路径别名必须排在前面
         '@plain-agent/domain/types': resolve('../domain/src/types.ts'),
+        '@plain-agent/domain/usage-format': resolve('../domain/src/usage-format.ts'),
         '@plain-agent/domain': resolve('../domain/src/index.ts'),
       },
     },

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback, isValidElement } from 'react'
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AgentEvent, Session, ChatMessage, InteractionQuestion } from '@plain-agent/domain/types';
+import { formatUsageBadge } from '@plain-agent/domain/usage-format';
 import type { AgentClient, AppSettings, SkillDetail, SkillSummary, AppConfig, HistoryUsage, Workspace } from './api-client';
 import { McpConfigModal } from './McpConfig';
 import { SkillDiscovery } from './SkillDiscovery';
@@ -494,6 +495,8 @@ function App({ client }: AppProps) {
         flushStreaming();
         closeToolGroup();
         appendMessage({ kind: 'system', text: `第 ${event.index} 轮迭代`, timestamp: event.timestamp });
+        // 每轮开始都刷新 token 估算，长任务里能看到上下文实时增长
+        refreshUsage();
         break;
 
       case 'compression':
@@ -562,6 +565,8 @@ function App({ client }: AppProps) {
         setIsRunning(false);
         setThinking(false);
         setInteraction(null);
+        // 长任务以 task-end 收尾（不是 done），同样需要刷新用量
+        refreshUsage();
         break;
     }
   }, [refreshUsage, flushStreaming, closeToolGroup]);
@@ -738,10 +743,10 @@ function App({ client }: AppProps) {
                 disabled={isRunning}
                 title={isRunning
                   ? '正在处理中，请稍候...'
-                  : `Token: ${usage.tokens}/${usage.maxTokens} (${usage.percentage.toFixed(1)}%) - 点击手动压缩`}
+                  : `已用 ${usage.tokens.toLocaleString()} / ${usage.maxTokens.toLocaleString()} tokens（${usage.percentage.toFixed(1)}%）${usage.compressed && usage.rawTokens ? ` · 压缩前 ${usage.rawTokens.toLocaleString()}` : ''} - 点击手动压缩`}
               >
                 <IconDot color={usage.percentage >= 75 ? '#ef4444' : usage.percentage >= 60 ? '#f59e0b' : '#22c55e'} />
-                {usage.tokens}/{usage.maxTokens}
+                {formatUsageBadge(usage)}
               </button>
             )}
             {currentSessionId && (

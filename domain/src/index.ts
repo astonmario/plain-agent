@@ -58,6 +58,11 @@ export {
 } from './skill-discovery';
 export { HistoryManager, estimateTokens } from './history-manager';
 export {
+  formatTokenCount,
+  formatUsagePercent,
+  formatUsageBadge,
+} from './usage-format';
+export {
   mergeSessionPreferences,
   renderPreferencesPrompt,
   describePreferences,

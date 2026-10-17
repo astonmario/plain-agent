@@ -132,8 +132,9 @@ const agent = new PlainAgent({
   tools: [/* 工具列表 */],
   historyManagement: {
     enabled: true,                    // 启用历史管理（默认 true）
-    maxTokens: 8000,                  // 最大 token 数
-    compressionThreshold: 6000,       // 6000 tokens 时触发压缩
+    maxTokens: 200_000,               // 最大 token 预算
+    compressionThreshold: 150_000,    // 150k tokens 时触发压缩
+    aggressiveThreshold: 180_000,     // 180k 时进入激进压缩
     maxToolOutputLength: 1000,        // 工具输出最大 1000 字符
     keepRecentMessages: 10,           // 保留最近 10 条消息
   }
@@ -151,7 +152,7 @@ const fullMessages = agent.getMessages(true);
 
 **压缩触发时机**：
 - 每次 `submit()` 调用前检查
-- token 使用率超过阈值（默认 75%，即 6000/8000）
+- token 使用率超过阈值（默认 75%，即 150000/200000）
 - 自动执行压缩，对用户透明
 
 **事件通知**：
@@ -267,8 +268,9 @@ console.log(`估算 ${tokens} tokens`);
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
 | `enabled` | boolean | `true` | 是否启用历史管理 |
-| `maxTokens` | number | `8000` | 最大 token 数（上限） |
-| `compressionThreshold` | number | `6000` | 触发压缩的阈值（75%） |
+| `maxTokens` | number | `200000` | 最大 token 预算（上限） |
+| `compressionThreshold` | number | `150000` | 触发压缩的阈值（75%） |
+| `aggressiveThreshold` | number | `180000` | 触发激进压缩的阈值（90%） |
 | `maxToolOutputLength` | number | `1000` | 单个工具输出最大字符数 |
 | `keepRecentMessages` | number | `10` | 保留最近 N 条消息不压缩 |
 

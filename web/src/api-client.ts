@@ -57,6 +57,10 @@ export interface HistoryUsage {
   maxTokens: number;
   percentage: number;
   needsCompression: boolean;
+  /** 未压缩完整历史的估算值（旧后端可能没有） */
+  rawTokens?: number;
+  /** 当前 tokens 是否来自压缩后的历史 */
+  compressed?: boolean;
 }
 
 /** 工作区信息 */

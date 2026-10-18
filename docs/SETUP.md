@@ -135,8 +135,65 @@ pwsh -ExecutionPolicy Bypass -File scripts/build-win.ps1 -Target Installer
 
 - **打包不会启动 Electron**，所以预览版系统的启动崩溃不影响打包本身。
 - 在 Windows Insider 预览版上，NSIS 安装包会在“生成卸载器”阶段失败（exit 2）。请改用 portable，或在正式版 Windows / CI 上打安装包。
-- 打包默认跳过代码签名（`CSC_IDENTITY_AUTO_DISCOVERY=false`）；正式发布再配置证书。
+- 未提供签名凭据时，构建脚本会关闭证书探测并跳过签名；签名方式见 6.1。
 - 未提供 `desktop/resources/icon.ico` 时，打包会提示使用 Electron 默认图标，不影响产物。
+
+### 6.1 代码签名
+
+构建脚本 [scripts/build-win.ps1](../scripts/build-win.ps1) 会自动识别凭据：
+
+| 凭据 | 行为 |
+|---|---|
+| 无 | 跳过签名，并设置 `CSC_IDENTITY_AUTO_DISCOVERY=false` 避免误用证书 |
+| `CSC_LINK` + `CSC_KEY_PASSWORD` | 使用 PFX 证书签名 |
+| `AZURE_TENANT_ID` 等 + `win.azureSignOptions` | Azure Trusted Signing |
+
+**方式一：PFX 证书**
+
+```powershell
+$env:CSC_LINK = 'D:\certs\plain-agent.pfx'   # 本地路径或 base64
+$env:CSC_KEY_PASSWORD = 'pfx 密码'
+pwsh -ExecutionPolicy Bypass -File scripts/build-win.ps1 -Target Portable
+```
+
+**方式二：Azure Trusted Signing（CI 友好）**
+
+在 `desktop/package.json` 的 `build.win` 中加入：
+
+```json
+"azureSignOptions": {
+  "publisherName": "Plain Agent",
+  "endpoint": "https://weu.codesigning.azure.net/",
+  "codeSigningAccountName": "<Trusted Signing 账户名>",
+  "certificateProfileName": "<证书配置名>"
+}
+```
+
+并设置 `AZURE_TENANT_ID`、`AZURE_CLIENT_ID`、`AZURE_CLIENT_SECRET`。需要 Azure 订阅、Trusted Signing 账户与身份验证，约 $9.99/月。
+
+**方式三：自签名（仅内部测试）**
+
+```powershell
+$cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=Plain Agent Test" -CertStoreLocation Cert:\CurrentUser\My
+$pwd = ConvertTo-SecureString 'test123' -AsPlainText -Force
+Export-PfxCertificate -Cert $cert -FilePath D:\certs\test.pfx -Password $pwd
+```
+
+签名本身会成功（`Get-AuthenticodeSignature` 能看到签名者），但其他机器会显示“未知发布者”，因为根证书不受信任。
+
+**证书怎么选**
+
+| 方式 | 费用 | 适用 |
+|---|---|---|
+| OV / EV 代码签名证书 | 约 $200–600/年 | 对外发布；EV 建立 SmartScreen 信誉更快 |
+| Azure Trusted Signing | 约 $9.99/月 | CI 友好，无需硬件令牌 |
+| 自签名 | 免费 | 仅内部测试 |
+
+注意：
+
+- 2023 年后主流 CA 要求私钥存放在硬件/HSM，纯 PFX 证书越来越少；CI 场景优先 Azure Trusted Signing 或云 HSM。
+- 签名解决“发布者可信 / SmartScreen 提示”，**不改变** Insider 系统上 Electron 启动崩溃的问题。
+- electron-builder 默认给签名附加时间戳，需要能访问时间戳服务器。
 
 ## 7. 验证安装是否完整
 

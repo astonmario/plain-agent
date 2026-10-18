@@ -14,7 +14,20 @@ Set-Location $root
 # Mirrors: the repo .npmrc covers "pnpm run" scripts; these cover direct calls too.
 if (-not $env:ELECTRON_MIRROR) { $env:ELECTRON_MIRROR = 'https://npmmirror.com/mirrors/electron/' }
 if (-not $env:ELECTRON_BUILDER_BINARIES_MIRROR) { $env:ELECTRON_BUILDER_BINARIES_MIRROR = 'https://npmmirror.com/mirrors/electron-builder-binaries/' }
-$env:CSC_IDENTITY_AUTO_DISCOVERY = 'false'
+
+# Signing:
+#   PFX   -> CSC_LINK (path or base64) + CSC_KEY_PASSWORD
+#   Azure -> AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET + win.azureSignOptions
+$hasPfx = [bool]$env:CSC_LINK
+$hasAzure = [bool]$env:AZURE_TENANT_ID
+if (-not $hasPfx -and -not $hasAzure) {
+    # No credentials: stop electron-builder from auto-picking an unrelated cert from the store.
+    $env:CSC_IDENTITY_AUTO_DISCOVERY = 'false'
+    Write-Host "No signing credentials found (CSC_LINK / AZURE_*); building unsigned."
+} else {
+    Remove-Item Env:CSC_IDENTITY_AUTO_DISCOVERY -ErrorAction SilentlyContinue
+    Write-Host ("Signing enabled (" + $(if ($hasPfx) { 'pfx' } else { 'azure' }) + ").")
+}
 
 $osBuild = [Environment]::OSVersion.Version.Build
 if ($Target -eq 'Installer' -and $env:OS -eq 'Windows_NT' -and $osBuild -ge 26200) {
